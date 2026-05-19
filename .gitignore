@@ -7,4 +7,7 @@ servers/
 data/
 package-lock.json
 docs/
-.env
+.claude/
+.vscode/
+参考项目/
+AGENTS.md
