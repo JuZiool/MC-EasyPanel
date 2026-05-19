@@ -5,7 +5,7 @@
 ## 特性
 
 - **实例管理** — 创建/启动/停止/重启 MC 服务端实例，支持自定义停止命令、自动检测 Java 版服务端
-- **Web 终端** — 基于 xterm.js + node-pty 的实时终端，支持多会话、日志持久化
+- **Web 终端** — 基于 xterm.js + node-pty 的实时终端，支持多会话、日志持久化（进程退出后仍可查看历史日志）
 - **文件管理** — 在线浏览/编辑/上传/下载/压缩/解压/复制/移动文件，支持批量操作、右键菜单、剪贴板
 - **文件搜索** — 递归搜索文件或文件夹，快速定位配置文件（深度 5 层，300ms 防抖）
 - **操作进度** — 上传/下载/压缩/解压/复制操作均有实时进度显示（Socket.IO 逐文件推送）
@@ -17,25 +17,32 @@
 
 ```
 mc-easypanel/
-├── client/                      # React 18 + Vite + TypeScript + Tailwind CSS 前端
+├── client/                          # React 18 + Vite + TypeScript + Tailwind CSS 前端
 │   └── src/
-│       ├── components/          # 通用组件 (Layout, Dialog, Notification, ProgressBar 等)
-│       ├── pages/               # 页面 (Dashboard, Instances, FileManager, Terminal, Settings)
-│       ├── stores/              # Zustand 状态管理 (authStore, instanceStore, etc.)
-│       └── main.tsx             # 入口文件
-├── server/                      # Express + Socket.IO + node-pty 后端
+│       ├── components/              # 通用组件 (Layout, Dialog, Notification, ProgressBar 等)
+│       ├── pages/                   # 页面 (Dashboard, Instances, FileManager, Terminal, Settings)
+│       ├── stores/                  # Zustand 状态管理 (auth/instance/file/notification/progress)
+│       ├── utils/                   # API 客户端、Socket.IO 封装
+│       ├── types/                   # TypeScript 接口定义
+│       ├── App.tsx                  # 路由配置
+│       └── main.tsx                 # 入口
+├── server/                          # Express + Socket.IO + node-pty 后端
 │   └── src/
-│       ├── routes/              # API 路由 (auth, instances, files, system)
-│       ├── middleware/          # JWT 认证中间件
-│       ├── modules/             # 实例生命周期管理 (InstanceManager)
-│       ├── utils/               # 日志、PTY 管理、进度跟踪工具
-│       └── index.ts             # 入口文件
-├── data/                        # 面板数据持久化（JSON 文件，运行时挂载卷）
-├── servers/                     # MC 服务端文件挂载入口
-├── game/                        # JDK、MC 服务端 jar 等运行时文件
-├── Dockerfile                   # 多阶段构建 (node:18-bullseye)
-├── docker-compose.yml           # Docker Compose 编排
-└── .env                         # 环境配置
+│       ├── routes/                  # API 路由 (auth, instances, files, system)
+│       ├── middleware/              # JWT 认证中间件
+│       ├── modules/                 # 实例生命周期管理 (InstanceManager)
+│       ├── utils/                   # 日志、PTY 管理、进度跟踪
+│       └── index.ts                 # 入口 (Express + Socket.IO + 终端 PTY)
+├── data/                            # 面板运行时数据持久化（JSON 文件）
+│   ├── instances.json               # 实例配置列表
+│   └── users.json                   # 用户账户信息
+├── servers/                         # MC 服务端与 JDK 运行文件
+│   └── jdk/                         # Azul Zulu JDK
+├── docs/specs/                      # 设计文档与实现计划
+├── Dockerfile                       # 多阶段构建 (node:18-bullseye)
+├── docker-compose.yml               # Docker Compose 编排
+├── start.sh                         # 快速构建启动脚本
+└── .env                             # 环境配置
 ```
 
 ## 快速开始
@@ -62,14 +69,10 @@ npm run dev
 ### 生产部署
 
 ```bash
-# 1. 克隆项目
 git clone https://github.com/JuZiool/MC-EasyPanel.git
 cd Mc-EasyPanel
 
-# 2. 配置环境变量（编辑 .env 文件）
-#    JWT_SECRET 生产环境务必修改！
-
-# 3. 构建并启动
+# 构建并启动
 docker compose up --build -d
 ```
 
@@ -86,9 +89,8 @@ docker compose up --build -d
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
 | `SERVER_PORT` | `3001` | 面板监听端口 |
-| `JWT_SECRET` | `mc-easypanel-secret-key-...` | JWT 签名密钥（生产环境务必修改） |
-| `DEV_MODE` | `false` | 开发模式开关 |
-| `TZ` | `Asia/Shanghai` | 容器时区 |
+| `DEV_MODE` | `true` | 开发模式开关 |
+| `JWT_SECRET` | `mc-easypanel-secret-key-change-in-production` | JWT 签名密钥（docker-compose 中配置，生产环境务必修改） |
 
 ## 端口
 
@@ -112,7 +114,7 @@ docker compose up --build -d
 |------|------|---------|
 | 浏览 | 分页列表，目录优先，支持路径跳转 | — |
 | 搜索 | 递归搜索当前目录，深度 5 层，300ms 防抖 | — |
-| 编辑 | Monaco Editor 内联编辑器，支持语法高亮 | — |
+| 编辑 | 内联文本编辑器，支持保存 | — |
 | 上传 | 批量上传，支持大文件（上限 1GB） | 实时百分比进度条 |
 | 下载 | 单文件下载 | 实时百分比进度条 |
 | 压缩 | 单文件/目录/多选批量压缩为 ZIP | Socket.IO 逐文件进度 |
@@ -124,6 +126,20 @@ docker compose up --build -d
 | 剪贴板 | 多选复制/剪切 → 粘贴到目标目录 | — |
 
 进度面板显示在屏幕右下角，支持多个操作并发跟踪。
+
+## WebSocket 事件
+
+| 事件 | 方向 | 说明 |
+|------|------|------|
+| `create-pty` | 客户端→服务端 | 创建 PTY 终端 |
+| `terminal-input` | 客户端→服务端 | 发送终端输入 |
+| `terminal-output` | 服务端→客户端 | 终端输出 |
+| `terminal-exit` | 服务端→客户端 | 终端退出 |
+| `terminal-resize` | 客户端→服务端 | 调整终端大小 |
+| `close-pty` | 客户端→服务端 | 关闭 PTY 终端 |
+| `get-terminal-history` | 客户端→服务端 | 请求终端历史日志 |
+| `file-progress` | 服务端→客户端 | 文件操作进度更新 |
+| `instance-status-changed` | 服务端→客户端 | 实例状态变更广播 |
 
 ## API 概览
 
@@ -177,22 +193,12 @@ docker compose up --build -d
 | GET | `/api/system/info` | 系统信息（平台/架构/主机名） |
 | GET | `/api/health` | 健康检查 |
 
-### WebSocket 事件
-
-| 事件 | 方向 | 说明 |
-|------|------|------|
-| `create-pty` | 客户端→服务端 | 创建 PTY 终端 |
-| `terminal-input` | 客户端→服务端 | 发送终端输入 |
-| `terminal-output` | 服务端→客户端 | 终端输出 |
-| `terminal-exit` | 服务端→客户端 | 终端退出 |
-| `file-progress` | 服务端→客户端 | 文件操作进度更新 |
-
 ## 技术栈
 
-- **前端**: React 18, Vite 5, TypeScript, Tailwind CSS 3, Zustand, Framer Motion, Socket.IO Client, xterm.js, Monaco Editor, Lucide React
-- **后端**: Node.js (ESM), Express 4, Socket.IO 4, node-pty, JWT, Winston, adm-zip, Multer, bcryptjs, Helmet
-- **部署**: Docker (node:18-bullseye, 多阶段构建), dumb-init, Docker Compose
-- **开发**: concurrently, tsx (热重载)
+- **前端**: React 18, Vite 5, TypeScript, Tailwind CSS 3, Zustand, Framer Motion, Socket.IO Client, xterm.js, Lucide React, clsx
+- **后端**: Node.js (ESM), Express 4, Socket.IO 4, node-pty, JWT, Winston, adm-zip, Multer, bcryptjs, Helmet, uuid
+- **部署**: Docker (node:18-bullseye 多阶段构建), dumb-init, Docker Compose
+- **开发**: concurrently, tsx (热重载), Google Fonts (Inter + JetBrains Mono)
 
 ## 开发约定
 
