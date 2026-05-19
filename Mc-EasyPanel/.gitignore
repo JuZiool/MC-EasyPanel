@@ -7,3 +7,4 @@ servers/
 data/
 package-lock.json
 docs/
+.env

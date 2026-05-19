@@ -19,7 +19,8 @@ Mc-EasyPanel/
 ├── data/       — 面板数据持久化（JSON 文件）
 ├── servers/    — MC 服务端文件挂载入口
 ├── game/       — JDK、MC 服务端 jar 等运行时文件
-└── Dockerfile  — 多阶段构建 (node:18-bullseye)
+├── Dockerfile       — 多阶段构建 (node:18-bullseye)
+└── docker-compose.yml
 ```
 
 ## 快速开始
