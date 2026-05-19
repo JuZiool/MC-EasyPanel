@@ -270,12 +270,64 @@ export default function FileManagerPage() {
   }
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files
-    if (!files || files.length === 0) return
+    const fileList = e.target.files
+    if (!fileList || fileList.length === 0) return
+    const files = Array.from(fileList)
+
+    // 单个大文件（>20MB）使用分片上传
+    if (files.length === 1) {
+      const file = files[0]
+      if (file.size > 20 * 1024 * 1024) {
+        try {
+          const { ChunkUploader } = await import('../utils/chunkUpload')
+          const opId = genOpId()
+          addItem({ id: opId, type: 'upload', label: `分片上传: ${file.name}`, subLabel: '准备中...', progress: 0, status: 'active' })
+
+          const uploader = new ChunkUploader({
+            file,
+            targetPath: currentPath,
+            onProgress: (progress) => {
+              updateItem(opId, { progress, subLabel: `${file.name} (${progress}%)` })
+            },
+            onDetailProgress: (detail) => {
+              if (detail.phase === 'uploading') {
+                updateItem(opId, {
+                  label: `分片上传: ${file.name}`,
+                  subLabel: `${detail.uploadedChunks}/${detail.totalChunks} 分片 · ${detail.speedText}`,
+                  progress: detail.percentage
+                })
+              } else if (detail.phase === 'merging') {
+                updateItem(opId, { subLabel: '正在合并文件...', progress: 95 })
+              }
+            },
+            onError: (error) => {
+              updateItem(opId, { status: 'error', label: '上传失败', error: error.message })
+              addNotification({ type: 'error', title: '上传失败', message: error.message })
+            }
+          })
+
+          await uploader.upload()
+          updateItem(opId, { progress: 100, status: 'completed', label: '上传完成' })
+          addNotification({ type: 'success', title: '上传成功' })
+          fetchFiles(currentPath)
+          e.target.value = ''
+          setTimeout(() => removeItem(opId), 3000)
+          return
+        } catch (error: any) {
+          // 分片上传失败，如果是取消操作则不报错
+          if (error.message === 'Upload aborted') return
+          addNotification({ type: 'error', title: '上传失败', message: error.message || '分片上传出错' })
+          e.target.value = ''
+          return
+        }
+      }
+    }
+
+    // 小文件或多文件使用普通上传
     const opId = genOpId()
-    const fileNames = Array.from(files).map(f => f.name).join(', ')
+    const fileNames = files.map(f => f.name).join(', ')
     addItem({ id: opId, type: 'upload', label: `上传中...`, subLabel: fileNames, progress: 0, status: 'active' })
-    const res = await apiClient.uploadFiles(currentPath, files, (p) => {
+    const res = await apiClient.uploadFiles(currentPath, fileList, (p) => {
       updateItem(opId, { progress: p, subLabel: `${fileNames} (${p}%)` })
     })
     if (res.success) {

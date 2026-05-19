@@ -38,7 +38,10 @@ class ApiClient {
   }
 
   async post<T>(url: string, data?: any, config?: AxiosRequestConfig): Promise<{ success: boolean; data?: T; message?: string }> {
-    try { const res = await this.client.post(url, data, config); return res.data } catch (e: any) { return e.response?.data || { success: false, message: '网络错误' } }
+    try { const res = await this.client.post(url, data, config); return res.data } catch (e: any) {
+      if (e.code === 'ECONNABORTED' || e.message?.includes('timeout')) return { success: false, message: '请求超时，请检查网络或文件大小后重试' }
+      return e.response?.data || { success: false, message: '网络错误' }
+    }
   }
 
   async put<T>(url: string, data?: any): Promise<{ success: boolean; data?: T; message?: string }> {
@@ -87,6 +90,7 @@ class ApiClient {
     formData.append('path', path)
     Array.from(files).forEach(f => formData.append('files', f))
     return this.post('/files/upload', formData, {
+      timeout: 600000, // 上传超时设为 10 分钟（大压缩包上传需要更长时间）
       onUploadProgress: (e) => {
         if (onProgress && e.total) onProgress(Math.round((e.loaded / e.total) * 100))
       }
