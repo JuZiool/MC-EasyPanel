@@ -101,9 +101,9 @@ export default function TerminalPage() {
   }, [selectedInstance, instances])
 
   return (
-    <div className="space-y-4 h-full flex flex-col">
-      <h1 className="text-xl font-semibold text-gray-800 shrink-0">终端控制台</h1>
-      <div className="flex items-center gap-3 shrink-0 flex-wrap">
+    <div className="space-y-4">
+      <h1 className="text-xl font-semibold text-gray-800">终端控制台</h1>
+      <div className="flex items-center gap-3 flex-wrap">
         <select value={selectedInstance} onChange={e => setSelectedInstance(e.target.value)}
           className="px-3 py-2 rounded-lg border border-surface-200 bg-white text-sm text-gray-700 focus:border-primary-400 outline-none">
           <option value="">选择实例</option>
@@ -115,7 +115,7 @@ export default function TerminalPage() {
             : <span className="text-xs text-gray-500 italic">← 历史日志（只读）</span>
         )}
       </div>
-      <div ref={terminalRef} className="flex-1 rounded-xl overflow-hidden border border-surface-200 min-h-[400px]" />
+      <div ref={terminalRef} className="w-full aspect-[4/3] rounded-xl overflow-hidden border border-surface-200 max-h-[calc(100vh-14rem)]" />
     </div>
   )
 }
