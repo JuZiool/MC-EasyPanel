@@ -35,7 +35,6 @@ export default function FileManagerPage() {
   const [copyMoveTarget, setCopyMoveTarget] = useState<{ path: string; name: string; action: 'copy' | 'move' } | null>(null)
   const [copyMoveDest, setCopyMoveDest] = useState('')
   const [compressExtract, setCompressExtract] = useState<{ path: string; name: string; mode: 'compress' | 'extract'; destPath?: string } | null>(null)
-  const [copyPathDialog, setCopyPathDialog] = useState<string | null>(null)
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set())
   const [batchDelete, setBatchDelete] = useState(false)
   const [clipboard, setClipboard] = useState<{ paths: string[]; action: 'copy' | 'cut' } | null>(null)
@@ -538,7 +537,32 @@ export default function FileManagerPage() {
             <button onClick={() => { handleDownload(contextMenu.file.path, contextMenu.file.name); setContextMenu(null) }}
               className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-surface-50"><Download className="w-4 h-4" />下载</button>
           )}
-          <button onClick={() => { setCopyPathDialog(contextMenu.file.path); setContextMenu(null) }}
+          <button onClick={async () => {
+              const path = contextMenu.file.path
+              setContextMenu(null)
+              let copied = false
+              try {
+                await navigator.clipboard.writeText(path)
+                copied = true
+              } catch { /* 降级到 execCommand */ }
+              if (!copied) {
+                try {
+                  const ta = document.createElement('textarea')
+                  ta.value = path
+                  ta.style.position = 'fixed'
+                  ta.style.opacity = '0'
+                  document.body.appendChild(ta)
+                  ta.select()
+                  copied = document.execCommand('copy')
+                  document.body.removeChild(ta)
+                } catch { /* 最终降级 */ }
+              }
+              if (copied) {
+                addNotification({ type: 'success', title: '已复制路径', message: path })
+              } else {
+                addNotification({ type: 'info', title: '容器内路径', message: path, duration: 15000 })
+              }
+            }}
             className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-surface-50"><Link className="w-4 h-4" />复制容器内路径</button>
           <button onClick={() => { setRenameTarget({ path: contextMenu.file.path, name: contextMenu.file.name }); setRenameValue(contextMenu.file.name); setContextMenu(null) }}
             className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-surface-50"><Edit className="w-4 h-4" />重命名</button>
@@ -569,21 +593,6 @@ export default function FileManagerPage() {
             <div className="flex justify-end gap-3 mt-4">
               <button onClick={() => { setRenameTarget(null); setRenameValue('') }} className="px-4 py-2 text-sm text-gray-600 hover:bg-surface-100 rounded-lg">取消</button>
               <button onClick={handleRename} className="px-4 py-2 bg-primary-500 hover:bg-primary-600 text-white rounded-lg text-sm font-medium">确认</button>
-            </div>
-          </motion.div>
-        </motion.div>
-      )}
-
-      {copyPathDialog && (
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
-          <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} className="bg-white rounded-2xl shadow-xl border border-surface-200 p-6 max-w-lg w-full">
-            <h3 className="text-lg font-semibold text-gray-800">容器内路径</h3>
-            <p className="text-sm text-gray-400 mt-1">此路径为容器内部路径，请手动复制 (Ctrl+C / Cmd+C)</p>
-            <input type="text" value={copyPathDialog} readOnly autoFocus
-              onFocus={e => e.target.select()}
-              className="w-full mt-4 px-3 py-2 rounded-lg border border-surface-200 bg-surface-50 focus:border-primary-400 outline-none text-gray-700 font-mono text-sm" />
-            <div className="flex justify-end gap-3 mt-4">
-              <button onClick={() => setCopyPathDialog(null)} className="px-4 py-2 text-sm text-gray-600 hover:bg-surface-100 rounded-lg">关闭</button>
             </div>
           </motion.div>
         </motion.div>
