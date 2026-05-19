@@ -6,7 +6,7 @@ import { useNotificationStore } from '../stores/notificationStore'
 import apiClient from '../utils/api'
 import MonacoEditor from '../components/MonacoEditor'
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
-import { ArrowLeft, Upload, FilePlus, FolderPlus, RefreshCw, Download, Edit3, Trash2, FileText, Folder, Copy, Scissors, Edit, FileArchive, CheckSquare, Square } from 'lucide-react'
+import { ArrowLeft, Upload, FilePlus, FolderPlus, RefreshCw, Download, Edit3, Trash2, FileText, Folder, Copy, Scissors, Edit, FileArchive, CheckSquare, Square, Link } from 'lucide-react'
 
 interface ContextMenu {
   x: number; y: number; file: { path: string; name: string; type: 'file' | 'directory' }
@@ -336,6 +336,8 @@ export default function FileManagerPage() {
             <button onClick={() => { window.open(`/api/files/download?path=${encodeURIComponent(contextMenu.file.path)}&token=${localStorage.getItem('mc_easypanel_token')}`, '_blank'); setContextMenu(null) }}
               className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-surface-50"><Download className="w-4 h-4" />下载</button>
           )}
+          <button onClick={() => { navigator.clipboard.writeText(contextMenu.file.path); addNotification({ type: 'success', title: '已复制路径', message: contextMenu.file.path }); setContextMenu(null) }}
+            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-surface-50"><Link className="w-4 h-4" />复制容器内路径</button>
           <button onClick={() => { setRenameTarget({ path: contextMenu.file.path, name: contextMenu.file.name }); setRenameValue(contextMenu.file.name); setContextMenu(null) }}
             className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-surface-50"><Edit className="w-4 h-4" />重命名</button>
           <button onClick={() => { setCopyMoveTarget({ path: contextMenu.file.path, name: contextMenu.file.name, action: 'copy' }); setCopyMoveDest(currentPath); setContextMenu(null) }}
