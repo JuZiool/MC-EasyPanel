@@ -1,13 +1,14 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { motion } from 'framer-motion'
+import { motion, AnimatePresence } from 'framer-motion'
 import { useInstanceStore } from '../stores/instanceStore'
 import { useNotificationStore } from '../stores/notificationStore'
 import apiClient from '../utils/api'
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
 import LoadingSpinner from '../components/LoadingSpinner'
+import PlayerChart from '../components/PlayerChart'
 import type { Instance } from '../types'
-import { Plus, Play, Square, RefreshCw, Terminal, Folder, Trash2, Server } from 'lucide-react'
+import { Plus, Play, Square, Terminal, Folder, Trash2, Server, BarChart3 } from 'lucide-react'
 
 export default function InstancesPage() {
   const { instances, loading, fetchInstances } = useInstanceStore()
@@ -18,8 +19,26 @@ export default function InstancesPage() {
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
   const [form, setForm] = useState<{ name: string; description: string; workingDirectory: string; startCommand: string; autoStart: boolean; stopCommand: Instance['stopCommand'] }>({ name: '', description: '', workingDirectory: '', startCommand: '', autoStart: false, stopCommand: 'stop' })
   const [actionLoading, setActionLoading] = useState<string | null>(null)
+  const [expandedCharts, setExpandedCharts] = useState<Set<string>>(new Set())
+  const [chartData, setChartData] = useState<Record<string, any>>({})
 
   useEffect(() => { fetchInstances() }, [])
+
+  const toggleChart = async (id: string) => {
+    const next = new Set(expandedCharts)
+    if (next.has(id)) {
+      next.delete(id)
+    } else {
+      next.add(id)
+      if (!chartData[id]) {
+        const res = await apiClient.get(`/instances/${id}/player-stats`)
+        if (res.success && res.data) {
+          setChartData(prev => ({ ...prev, [id]: res.data }))
+        }
+      }
+    }
+    setExpandedCharts(next)
+  }
 
   const openCreate = () => { setShowCreate(true); setTimeout(() => setCreateAnimating(true), 10) }
   const closeCreate = () => { setCreateAnimating(false); setTimeout(() => setShowCreate(false), 300) }
@@ -45,15 +64,6 @@ export default function InstancesPage() {
     setActionLoading(null)
     addNotification({ type: 'info', title: '正在停止...' })
     setTimeout(fetchInstances, 3000)
-  }
-
-  const handleRestart = async (id: string) => {
-    setActionLoading(id)
-    const res = await apiClient.restartInstance(id)
-    setActionLoading(null)
-    if (res.success) addNotification({ type: 'success', title: '重启成功' })
-    else addNotification({ type: 'error', title: '重启失败', message: res.message })
-    fetchInstances()
   }
 
   const handleDelete = async () => {
@@ -82,28 +92,57 @@ export default function InstancesPage() {
         </div>
       ) : (
         <div className="grid gap-4">
-          {instances.map(inst => (
-            <motion.div key={inst.id} layout initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
-              className="bg-white rounded-xl border border-surface-200 p-5 flex items-center gap-4">
-              <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${statusColors[inst.status]}`} />
-              <div className="flex-1 min-w-0">
-                <h3 className="font-medium text-gray-800">{inst.name}</h3>
-                <p className="text-xs text-gray-400 mt-0.5 truncate">{inst.workingDirectory || inst.description || '未设置目录'}</p>
-                <span className="inline-block text-xs text-gray-400 mt-1 capitalize">{inst.status}</span>
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                {inst.status === 'running' ? (
-                  <button onClick={() => handleStop(inst.id)} disabled={actionLoading === inst.id} className="p-2 rounded-lg text-yellow-600 hover:bg-yellow-50 transition-colors" title="停止"><Square className="w-4 h-4" /></button>
-                ) : (
-                  <button onClick={() => handleStart(inst.id)} disabled={actionLoading === inst.id} className="p-2 rounded-lg text-green-600 hover:bg-green-50 transition-colors" title="启动"><Play className="w-4 h-4" /></button>
-                )}
-                <button onClick={() => handleRestart(inst.id)} disabled={actionLoading === inst.id} className="p-2 rounded-lg text-blue-600 hover:bg-blue-50 transition-colors" title="重启"><RefreshCw className="w-4 h-4" /></button>
-                <button onClick={() => navigate(`/terminal?instance=${inst.id}`)} className="p-2 rounded-lg text-gray-500 hover:bg-surface-50 transition-colors" title="终端"><Terminal className="w-4 h-4" /></button>
-                <button onClick={() => navigate(`/files?path=${encodeURIComponent(inst.workingDirectory)}`)} className="p-2 rounded-lg text-gray-500 hover:bg-surface-50 transition-colors" title="文件"><Folder className="w-4 h-4" /></button>
-                <button onClick={() => setDeleteTarget(inst.id)} className="p-2 rounded-lg text-red-400 hover:bg-red-50 transition-colors" title="删除"><Trash2 className="w-4 h-4" /></button>
-              </div>
-            </motion.div>
-          ))}
+          {instances.map(inst => {
+            const showChart = expandedCharts.has(inst.id)
+            const data = chartData[inst.id]
+            return (
+              <motion.div key={inst.id} layout initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+                className="bg-white rounded-xl border border-surface-200">
+                {/* 实例信息行 */}
+                <div className="p-5 flex items-center gap-4">
+                  <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${statusColors[inst.status]}`} />
+                  <div className="flex-1 min-w-0">
+                    <h3 className="font-medium text-gray-800">{inst.name}</h3>
+                    <p className="text-xs text-gray-400 mt-0.5 truncate">{inst.workingDirectory || inst.description || '未设置目录'}</p>
+                    <span className="inline-block text-xs text-gray-400 mt-1 capitalize">{inst.status}</span>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button onClick={() => toggleChart(inst.id)}
+                      className={`p-2 rounded-lg transition-colors ${showChart ? 'text-primary-600 bg-primary-50' : 'text-gray-400 hover:bg-surface-50'}`}
+                      title="历史在线人数">
+                      <BarChart3 className="w-4 h-4" />
+                    </button>
+                    {inst.status === 'running' ? (
+                      <button onClick={() => handleStop(inst.id)} disabled={actionLoading === inst.id} className="p-2 rounded-lg text-yellow-600 hover:bg-yellow-50 transition-colors" title="停止"><Square className="w-4 h-4" /></button>
+                    ) : (
+                      <button onClick={() => handleStart(inst.id)} disabled={actionLoading === inst.id} className="p-2 rounded-lg text-green-600 hover:bg-green-50 transition-colors" title="启动"><Play className="w-4 h-4" /></button>
+                    )}
+                    <button onClick={() => navigate(`/terminal?instance=${inst.id}`)} className="p-2 rounded-lg text-gray-500 hover:bg-surface-50 transition-colors" title="终端"><Terminal className="w-4 h-4" /></button>
+                    <button onClick={() => navigate(`/files?path=${encodeURIComponent(inst.workingDirectory)}`)} className="p-2 rounded-lg text-gray-500 hover:bg-surface-50 transition-colors" title="文件"><Folder className="w-4 h-4" /></button>
+                    <button onClick={() => setDeleteTarget(inst.id)} className="p-2 rounded-lg text-red-400 hover:bg-red-50 transition-colors" title="删除"><Trash2 className="w-4 h-4" /></button>
+                  </div>
+                </div>
+                {/* 展开的折线图区域 */}
+                <AnimatePresence>
+                  {showChart && (
+                    <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
+                      <div className="px-5 pb-4 pt-0 border-t border-surface-100">
+                        <div className="pt-3">
+                          <h4 className="text-xs font-medium text-gray-500 mb-2">历史在线人数</h4>
+                          {data ? (
+                            <PlayerChart data={data} width={320} height={140} />
+                          ) : (
+                            <div className="text-xs text-gray-400 py-6 text-center">加载中...</div>
+                          )}
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </motion.div>
+            )
+          })}
         </div>
       )}
 

@@ -13,6 +13,8 @@ import { setupInstanceRoutes } from './routes/instances.js'
 import logBuffer from './utils/logBuffer.js'
 import systemRoutes from './routes/system.js'
 import filesRouter from './routes/files.js'
+import { PlayerStatsRecorder } from './utils/playerStatsRecorder.js'
+import { queryInstancePlayers } from './utils/mcQuery.js'
 
 dotenv.config()
 const PORT = parseInt(process.env.SERVER_PORT || '3001', 10)
@@ -46,6 +48,19 @@ app.get('/api/health', (_req, res) => res.json({ success: true, message: 'Mc-Eas
 const instanceManager = new InstanceManager()
 instanceManager.initialize()
 
+// 玩家数据记录器
+const playerStatsRecorder = new PlayerStatsRecorder({
+  getInstances: () => instanceManager.getInstances(),
+  queryPlayerCount: async (workingDirectory) => {
+    const status = await queryInstancePlayers(workingDirectory)
+    if (status.online && status.players) {
+      return { online: status.players.online, max: status.players.max }
+    }
+    return null
+  }
+})
+playerStatsRecorder.start()
+
 instanceManager.on('instance-status-changed', (data) => {
   io.emit('instance-status', data)
 })
@@ -77,8 +92,25 @@ instanceManager.on('terminal-create', async ({ id, command, cwd, sessionId }) =>
   }
 })
 
+instanceManager.on('instance-input', ({ id, data }) => {
+  const inst = instanceManager.getInstance(id)
+  if (inst && inst.terminalSessionId) {
+    const pty = activeTerminals.get(inst.terminalSessionId)
+    if (pty) pty.write(data)
+  }
+})
+
+instanceManager.on('instance-force-stop', ({ id }) => {
+  const inst = instanceManager.getInstance(id)
+  if (inst && inst.terminalSessionId) {
+    const pty = activeTerminals.get(inst.terminalSessionId)
+    if (pty) { pty.kill(); activeTerminals.delete(inst.terminalSessionId) }
+  }
+  instanceManager.setInstanceStopped(id)
+})
+
 app.use('/api/auth', setupAuthRoutes())
-app.use('/api/instances', setupInstanceRoutes(instanceManager))
+app.use('/api/instances', setupInstanceRoutes(instanceManager, playerStatsRecorder))
 app.use('/api/system', systemRoutes)
 app.use('/api/files', filesRouter)
 
@@ -143,7 +175,12 @@ io.on('connection', (socket) => {
 
   socket.on('close-pty', ({ sessionId }) => {
     const pty = activeTerminals.get(sessionId)
-    if (pty) { pty.kill(); activeTerminals.delete(sessionId) }
+    if (pty) {
+      // 仅断开终端连接，不杀死进程
+      // 不从 activeTerminals 删除 —— 重连后仍需通过 sessionId 发送输入
+      // 进程自然退出时 onExit 会清理 activeTerminals
+      logger.info(`终端会话已断开: ${sessionId}`)
+    }
   })
 
   socket.on('get-terminal-history', ({ sessionId, instanceId }) => {

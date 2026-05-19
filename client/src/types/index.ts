@@ -64,6 +64,25 @@ export interface SystemStats {
   timestamp: number
 }
 
+export interface PlayerInfo {
+  name: string
+  id: string
+}
+
+export interface ServerPlayerInfo {
+  instanceId: string
+  instanceName: string
+  online: boolean
+  version?: string
+  players?: {
+    online: number
+    max: number
+    sample?: PlayerInfo[]
+  }
+  motd?: string
+  error?: string
+}
+
 export interface Notification {
   id: string
   type: 'success' | 'error' | 'warning' | 'info'

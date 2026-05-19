@@ -66,6 +66,9 @@ class ApiClient {
   async stopInstance(id: string) { return this.post(`/instances/${id}/stop`) }
   async restartInstance(id: string) { return this.post(`/instances/${id}/restart`) }
 
+  /** 查询所有运行中 Minecraft 实例的在线玩家信息 */
+  async getInstancePlayers() { return this.get<Record<string, import('../types').ServerPlayerInfo>>('/instances/players') }
+
   // Files
   async listFiles(path: string, page = 1, pageSize = 50) { return this.get<FileListResponse>('/files/list', { params: { path, page, pageSize } }) }
   async searchFiles(path: string, query: string) { return this.get<{ name: string; path: string; type: 'file' | 'directory'; size: number; modified: string }[]>('/files/search', { params: { path, query } }) }

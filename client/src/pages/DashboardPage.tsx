@@ -1,49 +1,34 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useInstanceStore } from '../stores/instanceStore'
 import { useNotificationStore } from '../stores/notificationStore'
-import { useAuthStore } from '../stores/authStore'
 import apiClient from '../utils/api'
-import socketClient from '../utils/socket'
-import { Play, Square, Terminal, FileText, Plus, Server, Clock, Power, PowerOff, Activity } from 'lucide-react'
-
-interface Activity {
-  id: string
-  type: 'start' | 'stop' | 'error'
-  instanceName: string
-  time: Date
-}
+import { Play, Square, Terminal, FileText, Server, Power, PowerOff, Users } from 'lucide-react'
+import type { ServerPlayerInfo } from '../types'
 
 export default function DashboardPage() {
   const { instances, fetchInstances } = useInstanceStore()
   const { addNotification } = useNotificationStore()
   const navigate = useNavigate()
-  const token = useAuthStore(s => s.token)
-  const [activities, setActivities] = useState<Activity[]>([])
-
-  useEffect(() => {
-    if (!token) return
-    socketClient.initialize(token)
-    socketClient.on('instance-status', ({ id, status }: { id: string; status: string }) => {
-      const inst = instances.find(i => i.id === id)
-      if (!inst) return
-      const actType: Activity['type'] = status === 'running' ? 'start' : status === 'stopped' ? 'stop' : 'error'
-      setActivities(prev => [{
-        id: `${id}-${Date.now()}`,
-        type: actType,
-        instanceName: inst.name,
-        time: new Date()
-      }, ...prev].slice(0, 20))
-    })
-    return () => { socketClient.off('instance-status'); socketClient.disconnect() }
-  }, [token, instances])
+  const [playerData, setPlayerData] = useState<Record<string, ServerPlayerInfo>>({})
 
   useEffect(() => {
     fetchInstances()
     const interval = setInterval(fetchInstances, 5000)
     return () => clearInterval(interval)
   }, [fetchInstances])
+
+  // 定时查询在线玩家
+  useEffect(() => {
+    const fetchPlayers = async () => {
+      const res = await apiClient.getInstancePlayers()
+      if (res.success && res.data) setPlayerData(res.data)
+    }
+    fetchPlayers()
+    const interval = setInterval(fetchPlayers, 10000)
+    return () => clearInterval(interval)
+  }, [])
 
   const handleStart = async (id: string) => {
     const res = await apiClient.startInstance(id)
@@ -158,25 +143,44 @@ export default function DashboardPage() {
         </div>
 
         <div className="bg-white rounded-xl border border-surface-200 p-5 space-y-3">
-          <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2"><Activity className="w-4 h-4" />近期动态</h2>
-          {activities.length === 0 && <p className="text-sm text-gray-400 py-4 text-center">暂无动态</p>}
-          <div className="space-y-1 max-h-[400px] overflow-y-auto">
-            <AnimatePresence>
-              {activities.map(a => (
-                <motion.div key={a.id} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0 }}
-                  className="flex items-center gap-3 py-2 text-sm">
-                  <span className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${a.type === 'start' ? 'bg-green-100 text-green-600' : a.type === 'stop' ? 'bg-red-100 text-red-500' : 'bg-yellow-100 text-yellow-600'}`}>
-                    {a.type === 'start' ? <Play className="w-3 h-3" /> : a.type === 'stop' ? <Square className="w-3 h-3" /> : <Clock className="w-3 h-3" />}
-                  </span>
-                  <span className="text-gray-600 min-w-0 truncate">
-                    <span className="font-medium text-gray-700">{a.instanceName}</span>
-                    {' '}{a.type === 'start' ? '已启动' : a.type === 'stop' ? '已停止' : '状态变更'}
-                  </span>
-                  <span className="text-xs text-gray-400 ml-auto shrink-0">{formatTime(a.time.toISOString())}</span>
+          <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2"><Users className="w-4 h-4" />在线玩家</h2>
+          {Object.keys(playerData).length === 0 ? (
+            <p className="text-sm text-gray-400 py-4 text-center">暂无可查询的在线玩家</p>
+          ) : (
+            <div className="space-y-3 max-h-[400px] overflow-y-auto">
+              {Object.entries(playerData).map(([id, info]) => (
+                <motion.div key={id} initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+                  className="bg-surface-50 rounded-lg p-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-green-500" />
+                      <span className="text-sm font-medium text-gray-700">{info.instanceName}</span>
+                    </div>
+                    <span className="text-xs text-gray-500">
+                      {info.players ? `${info.players.online}/${info.players.max}` : '-'}
+                    </span>
+                  </div>
+                  {info.players && info.players.sample && info.players.sample.length > 0 ? (
+                    <div className="flex flex-wrap gap-1.5">
+                      {info.players.sample.map((p, i) => (
+                        <span key={i}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 bg-green-100 text-green-700 rounded text-xs">
+                          <Users className="w-3 h-3" />
+                          {p.name}
+                        </span>
+                      ))}
+                    </div>
+                  ) : info.online ? (
+                    <p className="text-xs text-gray-400">服务器已运行，暂无在线玩家</p>
+                  ) : (
+                    <p className="text-xs text-red-400">
+                      {info.error || '无法查询到服务器信息'}
+                    </p>
+                  )}
                 </motion.div>
               ))}
-            </AnimatePresence>
-          </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

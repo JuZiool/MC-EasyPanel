@@ -14,7 +14,7 @@ const navItems = [
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [collapsed, setCollapsed] = useState(false)
+  const [collapsed, setCollapsed] = useState(() => localStorage.getItem('sidebarCollapsed') === 'true')
   const { user, logout } = useAuthStore()
   const navigate = useNavigate()
 
@@ -43,7 +43,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             <div className="w-6 h-6 rounded-full bg-primary-100 text-primary-600 flex items-center justify-center text-xs font-medium shrink-0">{user?.username?.[0]}</div>
             {!collapsed && user?.username}
           </div>
-          <button onClick={() => setCollapsed(!collapsed)} className={`flex items-center rounded-lg text-sm text-gray-400 hover:bg-surface-50 hover:text-gray-600 w-full transition-colors mt-1 ${collapsed ? 'justify-center p-2.5' : 'gap-3 px-3 py-2.5'}`}>
+          <button onClick={() => { const newState = !collapsed; setCollapsed(newState); localStorage.setItem('sidebarCollapsed', String(newState)) }} className={`flex items-center rounded-lg text-sm text-gray-400 hover:bg-surface-50 hover:text-gray-600 w-full transition-colors mt-1 ${collapsed ? 'justify-center p-2.5' : 'gap-3 px-3 py-2.5'}`}>
             {collapsed ? <ChevronRight className="w-4 h-4" /> : <><ChevronLeft className="w-4 h-4" />折叠</>}
           </button>
           <button onClick={handleLogout} className={`flex items-center rounded-lg text-sm text-gray-500 hover:bg-red-50 hover:text-red-600 w-full transition-colors mt-1 ${collapsed ? 'justify-center p-2.5' : 'gap-3 px-3 py-2.5'}`}>
