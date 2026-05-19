@@ -9,7 +9,6 @@ services:
     volumes:
       - ./data:/app/server/data           # 面板数据（实例配置、用户信息等）
       - ./servers:/app/servers            # 服务器文件挂载入口
-      - ./game:/Game                      # 游戏运行时文件（JDK、MC 服务端等）
     restart: unless-stopped               # 非手动停止时自动重启
     environment:
       - TZ=Asia/Shanghai                  # 时区

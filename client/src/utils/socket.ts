@@ -23,6 +23,8 @@ class SocketClient {
   sendTerminalInput(sessionId: string, data: string) { this.emit('terminal-input', { sessionId, data }) }
   resizeTerminal(sessionId: string, cols: number, rows: number) { this.emit('terminal-resize', { sessionId, cols, rows }) }
   closeTerminal(sessionId: string) { this.emit('close-pty', { sessionId }) }
+  getTerminalHistory(sessionId: string, instanceId?: string) { this.emit('get-terminal-history', { sessionId, instanceId }) }
+  onTerminalHistory(handler: (data: { sessionId: string; instanceId: string; data: string }) => void) { this.on('terminal-history', handler) }
 }
 
 export default new SocketClient()

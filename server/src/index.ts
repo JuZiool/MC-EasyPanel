@@ -10,6 +10,7 @@ import logger from './utils/logger.js'
 import { setupAuthRoutes } from './routes/auth.js'
 import InstanceManager from './modules/InstanceManager.js'
 import { setupInstanceRoutes } from './routes/instances.js'
+import logBuffer from './utils/logBuffer.js'
 import systemRoutes from './routes/system.js'
 import filesRouter from './routes/files.js'
 
@@ -57,7 +58,10 @@ instanceManager.on('terminal-create', async ({ id, command, cwd, sessionId }) =>
       { name: 'xterm-color', cols: 80, rows: 24, cwd: cwd || process.cwd(), env: process.env as any }
     )
     activeTerminals.set(sessionId, ptyProcess)
-    ptyProcess.onData((data: string) => io.emit('terminal-output', { sessionId, data }))
+    ptyProcess.onData((data: string) => {
+      logBuffer.append(sessionId, data, id)
+      io.emit('terminal-output', { sessionId, data })
+    })
     ptyProcess.onExit(() => {
       io.emit('terminal-exit', { sessionId })
       instanceManager.setInstanceStopped(id)
@@ -105,6 +109,7 @@ io.on('connection', (socket) => {
       socket.join(sessionId)
 
       ptyProcess.onData((data: string) => {
+        logBuffer.append(sessionId, data)
         socket.emit('terminal-output', { sessionId, data })
       })
 
@@ -137,6 +142,13 @@ io.on('connection', (socket) => {
   socket.on('close-pty', ({ sessionId }) => {
     const pty = activeTerminals.get(sessionId)
     if (pty) { pty.kill(); activeTerminals.delete(sessionId) }
+  })
+
+  socket.on('get-terminal-history', ({ sessionId, instanceId }) => {
+    let data = ''
+    if (sessionId) data = logBuffer.getHistory(sessionId)
+    if (!data && instanceId) data = logBuffer.readInstanceLog(instanceId)
+    socket.emit('terminal-history', { sessionId, instanceId, data })
   })
 
   socket.on('disconnect', () => {
