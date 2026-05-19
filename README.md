@@ -12,20 +12,9 @@ cd Mc-EasyPanel
 docker compose up --build -d
 ```
 
-面板默认运行在 `http://localhost:3001`，默认管理员 `admin / admin123`。
-
-## 开发模式
-
-```bash
-npm run install:all
-npm run dev
-```
-
-前端 `http://localhost:5173`（HMR），后端 `http://localhost:3001`。
-
 ## 功能
 
-- **实例管理** — 创建/启动/停止/重启 MC 服务端实例，自动检测启动脚本或 jar 文件
+- **实例管理** — 创建/启动/停止/重启 MC 服务端实例
 - **Web 终端** — xterm.js + node-pty 实时终端，支持日志持久化回看
 - **文件管理** — 浏览/编辑/上传/下载/压缩/解压/复制/移动，批量操作，实时进度
 - **在线玩家监控** — 通过 MC Query 协议查询在线玩家，5 分钟粒度历史记录图表
