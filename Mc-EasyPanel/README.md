@@ -14,22 +14,21 @@
 
 ```
 Mc-EasyPanel/
-├── client/          — React 18 + Vite + TypeScript + Tailwind CSS 前端
-├── server/          — Express + Socket.IO + node-pty 后端
-├── data/            — 面板数据持久化（JSON 文件）
-├── servers/         — MC 服务端文件挂载入口
-├── game/            — JDK、MC 服务端 jar 等运行时文件
-├── Dockerfile       — 多阶段构建 (node:18-bullseye)
-└── docker-compose.yml
+├── client/     — React 18 + Vite + TypeScript + Tailwind CSS 前端
+├── server/     — Express + Socket.IO + node-pty 后端
+├── data/       — 面板数据持久化（JSON 文件）
+├── servers/    — MC 服务端文件挂载入口
+├── game/       — JDK、MC 服务端 jar 等运行时文件
+└── Dockerfile  — 多阶段构建 (node:18-bullseye)
 ```
 
 ## 快速开始
 
 ```bash
 git clone https://github.com/JuZiool/MC-EasyPanel.git
-cd MC-EasyPanel
+cd Mc-EasyPanel
 
-# 修改 .env 中的 JWT_SECRET
+# 编辑 .env 配置 JWT_SECRET
 # 将 JDK、MC 服务端 jar 放入对应目录
 
 docker compose up --build -d
@@ -59,4 +58,4 @@ docker compose up --build -d
 
 - **前端**: React 18, Vite, TypeScript, Tailwind CSS, Zustand, Socket.IO Client, xterm.js
 - **后端**: Express, Socket.IO, node-pty, JWT, Winston, adm-zip
-- **部署**: Docker (node:18-bullseye), docker compose
+- **部署**: Docker (node:18-bullseye)
