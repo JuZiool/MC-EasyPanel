@@ -91,7 +91,7 @@ export default function InstancesPage() {
           <p>暂无实例，点击上方按钮创建</p>
         </div>
       ) : (
-        <div className="grid gap-4">
+        <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
           {instances.map(inst => {
             const showChart = expandedCharts.has(inst.id)
             const data = chartData[inst.id]
