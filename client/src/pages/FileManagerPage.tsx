@@ -3,19 +3,27 @@ import { useSearchParams } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useFileStore } from '../stores/fileStore'
 import { useNotificationStore } from '../stores/notificationStore'
+import { useProgressStore } from '../stores/progressStore'
+import { useAuthStore } from '../stores/authStore'
 import apiClient from '../utils/api'
+import socketClient from '../utils/socket'
 import MonacoEditor from '../components/MonacoEditor'
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
-import { ArrowLeft, Upload, FilePlus, FolderPlus, RefreshCw, Download, Edit3, Trash2, FileText, Folder, Copy, Scissors, Edit, FileArchive, CheckSquare, Square, Link } from 'lucide-react'
+import ProgressPanel from '../components/ProgressPanel'
+import { ArrowLeft, Upload, FilePlus, FolderPlus, RefreshCw, Download, Edit3, Trash2, FileText, Folder, Copy, Scissors, Edit, FileArchive, CheckSquare, Square, Link, Search, X } from 'lucide-react'
 
 interface ContextMenu {
   x: number; y: number; file: { path: string; name: string; type: 'file' | 'directory' }
 }
 
+let opCounter = 0
+function genOpId() { return `op_${Date.now()}_${++opCounter}` }
+
 export default function FileManagerPage() {
   const [searchParams] = useSearchParams()
   const { currentPath, files, pagination, loading, fetchFiles } = useFileStore()
   const { addNotification } = useNotificationStore()
+  const { addItem, updateItem, removeItem } = useProgressStore()
   const [editFile, setEditFile] = useState<{ path: string; content: string; name: string } | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<{ path: string; name: string } | null>(null)
   const [showNewFile, setShowNewFile] = useState(false)
@@ -30,10 +38,15 @@ export default function FileManagerPage() {
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set())
   const [batchDelete, setBatchDelete] = useState(false)
   const [clipboard, setClipboard] = useState<{ paths: string[]; action: 'copy' | 'cut' } | null>(null)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState<{ name: string; path: string; type: 'file' | 'directory'; size: number; modified: string }[] | null>(null)
+  const [searching, setSearching] = useState(false)
 
   useEffect(() => {
     const pathParam = searchParams.get('path') || '/app/servers'
     fetchFiles(pathParam)
+    const token = useAuthStore.getState().token
+    if (token) socketClient.initialize(token)
   }, [])
 
   useEffect(() => { setSelectedPaths(new Set()) }, [files])
@@ -60,16 +73,30 @@ export default function FileManagerPage() {
   const handleBatchCompress = async () => {
     if (selectedPaths.size === 0) return
     const paths = Array.from(selectedPaths)
+    const opId = genOpId()
+    const socketId = socketClient.getSocketId() || undefined
+    addItem({ id: opId, type: 'compress', label: '批量压缩...', progress: 0, status: 'active' })
     if (paths.length === 1) {
-      const res = await apiClient.compressFile(paths[0])
-      if (res.success) addNotification({ type: 'success', title: '已压缩', message: (res.data as any)?.name })
-      else addNotification({ type: 'error', title: '压缩失败' })
+      const res = await apiClient.compressFile(paths[0], opId, socketId)
+      if (res.success) {
+        updateItem(opId, { progress: 100, status: 'completed', label: '批量压缩完成', subLabel: (res.data as any)?.name })
+        addNotification({ type: 'success', title: '已压缩', message: (res.data as any)?.name })
+      } else {
+        updateItem(opId, { status: 'error', label: '压缩失败', error: res.message })
+        addNotification({ type: 'error', title: '压缩失败' })
+      }
     } else {
-      const res = await apiClient.post('/files/compress-batch', { paths, name: 'selection.zip' })
-      if (res.success) addNotification({ type: 'success', title: '已批量压缩', message: 'selection.zip' })
-      else addNotification({ type: 'error', title: '压缩失败' })
+      const res = await apiClient.compressBatch(paths, 'selection.zip', opId, socketId)
+      if (res.success) {
+        updateItem(opId, { progress: 100, status: 'completed', label: '批量压缩完成', subLabel: 'selection.zip' })
+        addNotification({ type: 'success', title: '已批量压缩', message: 'selection.zip' })
+      } else {
+        updateItem(opId, { status: 'error', label: '批量压缩失败', error: res.message })
+        addNotification({ type: 'error', title: '压缩失败' })
+      }
     }
     setSelectedPaths(new Set()); fetchFiles(currentPath)
+    setTimeout(() => removeItem(opId), 3000)
   }
 
   const handleCopyToClipboard = (action: 'copy' | 'cut') => {
@@ -80,18 +107,27 @@ export default function FileManagerPage() {
 
   const handlePaste = async () => {
     if (!clipboard || !currentPath) return
+    const socketId = socketClient.getSocketId() || undefined
     for (const srcPath of clipboard.paths) {
       const name = srcPath.split('/').pop() || ''
       const destPath = currentPath + '/' + name
-      if (clipboard.action === 'copy') await apiClient.copyFile(srcPath, destPath)
-      else await apiClient.moveFile(srcPath, destPath)
+      const opId = genOpId()
+      if (clipboard.action === 'copy') {
+        addItem({ id: opId, type: 'copy', label: `复制: ${name}`, progress: 0, status: 'active' })
+        const res = await apiClient.copyFile(srcPath, destPath, opId, socketId)
+        if (res.success) updateItem(opId, { progress: 100, status: 'completed', label: `复制完成: ${name}` })
+        else updateItem(opId, { status: 'error', label: `复制失败: ${name}`, error: res.message })
+        setTimeout(() => removeItem(opId), 3000)
+      } else {
+        await apiClient.moveFile(srcPath, destPath)
+      }
     }
     addNotification({ type: 'success', title: `已${clipboard.action === 'copy' ? '复制' : '移动'} ${clipboard.paths.length} 项到当前目录` })
     setClipboard(null)
     fetchFiles(currentPath)
   }
 
-  const navigateDir = (dirPath: string) => fetchFiles(dirPath)
+  const navigateDir = (dirPath: string) => { clearSearch(); fetchFiles(dirPath) }
   const goUp = () => { const parent = currentPath.split('/').slice(0, -1).join('/') || '/'; fetchFiles(parent) }
 
   const handleReadFile = async (filePath: string, fileName: string) => {
@@ -154,28 +190,119 @@ export default function FileManagerPage() {
   const handleCopyMove = async () => {
     if (!copyMoveTarget || !copyMoveDest.trim()) return
     const destPath = copyMoveDest.trim().endsWith('/') ? copyMoveDest.trim() + copyMoveTarget.name : copyMoveDest.trim()
-    const res = copyMoveTarget.action === 'copy' ? await apiClient.copyFile(copyMoveTarget.path, destPath) : await apiClient.moveFile(copyMoveTarget.path, destPath)
-    if (res.success) { addNotification({ type: 'success', title: copyMoveTarget.action === 'copy' ? '已复制' : '已移动' }); fetchFiles(currentPath) }
-    else addNotification({ type: 'error', title: copyMoveTarget.action === 'copy' ? '复制失败' : '移动失败' })
+    if (copyMoveTarget.action === 'copy') {
+      const opId = genOpId()
+      const socketId = socketClient.getSocketId() || undefined
+      addItem({ id: opId, type: 'copy', label: `复制: ${copyMoveTarget.name}`, progress: 0, status: 'active' })
+      const res = await apiClient.copyFile(copyMoveTarget.path, destPath, opId, socketId)
+      if (res.success) {
+        updateItem(opId, { progress: 100, status: 'completed', label: `复制完成: ${copyMoveTarget.name}` })
+        addNotification({ type: 'success', title: '已复制' })
+      } else {
+        updateItem(opId, { status: 'error', label: `复制失败: ${copyMoveTarget.name}`, error: res.message })
+        addNotification({ type: 'error', title: '复制失败' })
+      }
+      setTimeout(() => removeItem(opId), 3000)
+    } else {
+      const res = await apiClient.moveFile(copyMoveTarget.path, destPath)
+      if (res.success) addNotification({ type: 'success', title: '已移动' })
+      else addNotification({ type: 'error', title: '移动失败' })
+    }
+    fetchFiles(currentPath)
     setCopyMoveTarget(null); setCopyMoveDest('')
   }
 
   const handleCompress = async () => {
     if (!compressExtract) return
-    const res = await apiClient.compressFile(compressExtract.path)
-    if (res.success) { addNotification({ type: 'success', title: '已压缩', message: (res.data as any)?.name }) }
-    else addNotification({ type: 'error', title: '压缩失败' })
+    const opId = genOpId()
+    const socketId = socketClient.getSocketId() || undefined
+    addItem({ id: opId, type: 'compress', label: `压缩: ${compressExtract.name}`, progress: 0, status: 'active' })
+    const res = await apiClient.compressFile(compressExtract.path, opId, socketId)
+    if (res.success) {
+      updateItem(opId, { progress: 100, status: 'completed', label: `压缩完成: ${compressExtract.name}`, subLabel: (res.data as any)?.name })
+      addNotification({ type: 'success', title: '已压缩', message: (res.data as any)?.name })
+    } else {
+      updateItem(opId, { status: 'error', label: '压缩失败', error: res.message })
+      addNotification({ type: 'error', title: '压缩失败' })
+    }
     setCompressExtract(null)
     fetchFiles(currentPath)
+    setTimeout(() => removeItem(opId), 3000)
   }
 
   const handleExtract = async () => {
     if (!compressExtract) return
-    const res = await apiClient.extractFile(compressExtract.path, compressExtract.destPath || undefined)
-    if (res.success) addNotification({ type: 'success', title: '已解压' })
-    else addNotification({ type: 'error', title: '解压失败' })
+    const opId = genOpId()
+    const socketId = socketClient.getSocketId() || undefined
+    addItem({ id: opId, type: 'extract', label: `解压: ${compressExtract.name}`, progress: 0, status: 'active' })
+    const res = await apiClient.extractFile(compressExtract.path, opId, socketId, compressExtract.destPath || undefined)
+    if (res.success) {
+      updateItem(opId, { progress: 100, status: 'completed', label: `解压完成: ${compressExtract.name}` })
+      addNotification({ type: 'success', title: '已解压' })
+    } else {
+      updateItem(opId, { status: 'error', label: '解压失败', error: res.message })
+      addNotification({ type: 'error', title: '解压失败' })
+    }
     setCompressExtract(null)
     fetchFiles(currentPath)
+    setTimeout(() => removeItem(opId), 3000)
+  }
+
+  const doSearch = useCallback(async (query: string) => {
+    if (!query.trim()) { setSearchResults(null); return }
+    if (!currentPath) return
+    setSearching(true)
+    const res = await apiClient.searchFiles(currentPath, query.trim())
+    if (res.success && res.data) setSearchResults(res.data)
+    else setSearchResults([])
+    setSearching(false)
+  }, [currentPath])
+
+  useEffect(() => {
+    if (!searchQuery.trim()) { setSearchResults(null); return }
+    const timer = setTimeout(() => doSearch(searchQuery), 300)
+    return () => clearTimeout(timer)
+  }, [searchQuery, doSearch])
+
+  const clearSearch = () => {
+    setSearchQuery('')
+    setSearchResults(null)
+  }
+
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files
+    if (!files || files.length === 0) return
+    const opId = genOpId()
+    const fileNames = Array.from(files).map(f => f.name).join(', ')
+    addItem({ id: opId, type: 'upload', label: `上传中...`, subLabel: fileNames, progress: 0, status: 'active' })
+    const res = await apiClient.uploadFiles(currentPath, files, (p) => {
+      updateItem(opId, { progress: p, subLabel: `${fileNames} (${p}%)` })
+    })
+    if (res.success) {
+      updateItem(opId, { progress: 100, status: 'completed', label: '上传完成' })
+      addNotification({ type: 'success', title: '上传成功' })
+    } else {
+      updateItem(opId, { status: 'error', label: '上传失败', error: res.message })
+      addNotification({ type: 'error', title: '上传失败' })
+    }
+    fetchFiles(currentPath)
+    e.target.value = ''
+    setTimeout(() => removeItem(opId), 3000)
+  }
+
+  const handleDownload = async (filePath: string, fileName: string) => {
+    const opId = genOpId()
+    addItem({ id: opId, type: 'download', label: `下载: ${fileName}`, progress: 0, status: 'active' })
+    const res = await apiClient.downloadFile(filePath, fileName, (p) => {
+      updateItem(opId, { progress: p, subLabel: `${p}%` })
+    })
+    if (res.success) {
+      updateItem(opId, { progress: 100, status: 'completed', label: `下载完成: ${fileName}` })
+    } else {
+      updateItem(opId, { status: 'error', label: `下载失败: ${fileName}`, error: res.message })
+      addNotification({ type: 'error', title: '下载失败' })
+    }
+    setTimeout(() => removeItem(opId), 3000)
   }
 
   const formatSize = (bytes: number) => {
@@ -196,15 +323,7 @@ export default function FileManagerPage() {
             <button onClick={() => setShowNewDir(true)} className="flex items-center gap-1.5 px-3 py-2 text-sm text-gray-600 hover:bg-surface-100 rounded-lg transition-colors"><FolderPlus className="w-4 h-4" />新建目录</button>
             <label className="flex items-center gap-1.5 px-3 py-2 text-sm text-gray-600 hover:bg-surface-100 rounded-lg transition-colors cursor-pointer">
               <Upload className="w-4 h-4" />上传
-              <input type="file" multiple className="hidden" onChange={async (e) => {
-                const formData = new FormData()
-                formData.append('path', currentPath)
-                Array.from(e.target.files || []).forEach(f => formData.append('files', f))
-                const res = await apiClient.post('/files/upload', formData)
-                if (res.success) { addNotification({ type: 'success', title: '上传成功' }); fetchFiles(currentPath) }
-                else addNotification({ type: 'error', title: '上传失败' })
-                e.target.value = ''
-              }} />
+              <input type="file" multiple className="hidden" onChange={handleUpload} />
             </label>
           </div>
         </div>
@@ -213,45 +332,75 @@ export default function FileManagerPage() {
           <button onClick={goUp} className="p-1 hover:text-gray-700"><ArrowLeft className="w-4 h-4" /></button>
           <span className="font-mono text-xs bg-surface-100 px-3 py-1.5 rounded-lg">{currentPath || '/'}</span>
         </div>
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+          <input type="text" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="搜索文件或文件夹..."
+            className="w-full pl-9 pr-8 py-1.5 text-sm rounded-lg border border-surface-200 bg-surface-50 focus:border-primary-400 outline-none text-gray-700" />
+          {searchQuery && (
+            <button onClick={clearSearch} className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-gray-400 hover:text-gray-600">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="flex-1 overflow-auto px-4 lg:px-6 pb-4">
-      {loading ? <div className="text-center py-10 text-gray-400">加载中...</div> : (
+      {(() => {
+        const isSearching = searchResults !== null
+        const displayFiles = isSearching ? searchResults || [] : files
+        const displayLoading = loading || searching
+
+        if (displayLoading) return <div className="text-center py-10 text-gray-400">{searching ? '搜索中...' : '加载中...'}</div>
+        return (
         <div className="bg-white rounded-xl border border-surface-200 overflow-hidden">
           <div className="flex items-center gap-3 px-4 py-2 bg-surface-50 border-b border-surface-200 text-xs text-gray-500 font-medium">
-            <button onClick={toggleSelectAll} className="shrink-0 text-gray-400 hover:text-primary-500 transition-colors">
-              {selectedPaths.size === files.length && files.length > 0 ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4" />}
-            </button>
-            <span className="w-4 shrink-0" />
-            <span className="flex-1">名称</span>
-            <span className="w-20 text-right">大小</span>
-            <span className="w-32 text-right">修改时间</span>
-            <span className="w-20 text-right">操作</span>
+            {isSearching ? (
+              <span className="flex-1">搜索结果 ({displayFiles.length} 项)</span>
+            ) : (
+              <>
+              <button onClick={toggleSelectAll} className="shrink-0 text-gray-400 hover:text-primary-500 transition-colors">
+                {selectedPaths.size === files.length && files.length > 0 ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4" />}
+              </button>
+              <span className="w-4 shrink-0" />
+              <span className="flex-1">名称</span>
+              <span className="w-20 text-right">大小</span>
+              <span className="w-32 text-right">修改时间</span>
+              <span className="w-20 text-right">操作</span>
+              </>
+            )}
           </div>
-          {files.map((file, i) => (
+          {displayFiles.map((file, i) => (
             <motion.div key={file.path} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.02 }}
               onContextMenu={(e) => handleContextMenu(e, { path: file.path, name: file.name, type: file.type })}
               className={`flex items-center gap-3 px-4 py-2.5 border-b border-surface-100 last:border-0 group cursor-context-menu transition-colors ${selectedPaths.has(file.path) ? 'bg-primary-50/50' : 'hover:bg-surface-50'}`}>
-              <button onClick={() => toggleSelect(file.path)} className="shrink-0 text-gray-400 hover:text-primary-500 transition-colors">
-                {selectedPaths.has(file.path) ? <CheckSquare className="w-4 h-4 text-primary-500" /> : <Square className="w-4 h-4" />}
-              </button>
+              {isSearching ? (
+                <span className="w-4 shrink-0" />
+              ) : (
+                <button onClick={() => toggleSelect(file.path)} className="shrink-0 text-gray-400 hover:text-primary-500 transition-colors">
+                  {selectedPaths.has(file.path) ? <CheckSquare className="w-4 h-4 text-primary-500" /> : <Square className="w-4 h-4" />}
+                </button>
+              )}
               {file.type === 'directory' ? <Folder className="w-4 h-4 text-yellow-500 shrink-0" /> : <FileText className="w-4 h-4 text-blue-400 shrink-0" />}
               <button onClick={() => file.type === 'directory' ? navigateDir(file.path) : handleReadFile(file.path, file.name)}
                 className="flex-1 text-left text-sm text-gray-700 hover:text-primary-600 truncate font-medium">
                 {file.name}
               </button>
-              <span className="text-xs text-gray-400 w-20 text-right">{formatSize(file.size)}</span>
-              <span className="text-xs text-gray-400 w-32 text-right">{new Date(file.modified).toLocaleString()}</span>
-              <div className="flex items-center gap-1 w-20 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+              {isSearching && (
+                <span className="text-xs text-gray-400 truncate max-w-[200px] hidden sm:block font-mono">{file.path.replace(currentPath, '')}</span>
+              )}
+              <span className="text-xs text-gray-400 w-20 text-right shrink-0">{formatSize(file.size)}</span>
+              <span className="text-xs text-gray-400 w-32 text-right shrink-0 hidden sm:block">{new Date(file.modified).toLocaleString()}</span>
+              <div className="flex items-center gap-1 w-20 justify-end shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
                 {file.type === 'file' && <button onClick={() => handleReadFile(file.path, file.name)} className="p-1.5 rounded text-gray-400 hover:text-blue-500 hover:bg-blue-50"><Edit3 className="w-3.5 h-3.5" /></button>}
-                <button onClick={() => window.open(`/api/files/download?path=${encodeURIComponent(file.path)}&token=${localStorage.getItem('mc_easypanel_token')}`, '_blank')} className="p-1.5 rounded text-gray-400 hover:text-green-500 hover:bg-green-50"><Download className="w-3.5 h-3.5" /></button>
+                <button onClick={() => handleDownload(file.path, file.name)} className="p-1.5 rounded text-gray-400 hover:text-green-500 hover:bg-green-50"><Download className="w-3.5 h-3.5" /></button>
                 <button onClick={() => setDeleteTarget({ path: file.path, name: file.name })} className="p-1.5 rounded text-gray-400 hover:text-red-500 hover:bg-red-50"><Trash2 className="w-3.5 h-3.5" /></button>
               </div>
             </motion.div>
           ))}
-          {files.length === 0 && <div className="text-center py-10 text-gray-400">目录为空</div>}
+          {displayFiles.length === 0 && <div className="text-center py-10 text-gray-400">{isSearching ? '未找到匹配的文件' : '目录为空'}</div>}
         </div>
-      )}
+        )
+      })()}
       </div>
 
       {selectedPaths.size > 0 && (
@@ -333,7 +482,7 @@ export default function FileManagerPage() {
               className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-surface-50"><Edit3 className="w-4 h-4" />编辑</button>
           )}
           {contextMenu.file.type === 'file' && (
-            <button onClick={() => { window.open(`/api/files/download?path=${encodeURIComponent(contextMenu.file.path)}&token=${localStorage.getItem('mc_easypanel_token')}`, '_blank'); setContextMenu(null) }}
+            <button onClick={() => { handleDownload(contextMenu.file.path, contextMenu.file.name); setContextMenu(null) }}
               className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-surface-50"><Download className="w-4 h-4" />下载</button>
           )}
           <button onClick={() => { navigator.clipboard.writeText(contextMenu.file.path); addNotification({ type: 'success', title: '已复制路径', message: contextMenu.file.path }); setContextMenu(null) }}
@@ -418,7 +567,9 @@ export default function FileManagerPage() {
         </motion.div>
       )}
 
-      {currentPath && <button onClick={goUp} className="fixed bottom-6 right-6 w-12 h-12 bg-primary-500 hover:bg-primary-600 text-white rounded-full shadow-lg flex items-center justify-center transition-colors"><ArrowLeft className="w-5 h-5" /></button>}
+      {currentPath && <button onClick={goUp} className="fixed bottom-6 right-6 w-12 h-12 bg-primary-500 hover:bg-primary-600 text-white rounded-full shadow-lg flex items-center justify-center transition-colors z-40"><ArrowLeft className="w-5 h-5" /></button>}
+
+      <ProgressPanel />
     </div>
   )
 }

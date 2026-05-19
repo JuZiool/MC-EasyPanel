@@ -24,6 +24,8 @@ const io = new Server(httpServer, {
   transports: ['websocket', 'polling']
 })
 
+app.set('io', io)
+
 app.use(helmet({ contentSecurityPolicy: false, crossOriginOpenerPolicy: false }))
 app.use(cors())
 app.use(express.json({ limit: '10mb' }))

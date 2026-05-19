@@ -1,4 +1,5 @@
 import { io, Socket } from 'socket.io-client'
+import { useProgressStore } from '../stores/progressStore'
 
 class SocketClient {
   private socket: Socket | null = null
@@ -7,9 +8,16 @@ class SocketClient {
     if (this.socket?.connected) return
     this.socket = io({ auth: { token }, transports: ['websocket', 'polling'] })
     this.socket.on('connect_error', (err) => console.error('Socket 连接失败:', err.message))
+    this.socket.on('file-progress', (data) => {
+      useProgressStore.getState().handleProgressEvent(data)
+    })
   }
 
   getSocket(): Socket | null { return this.socket }
+
+  getSocketId(): string | null {
+    return this.socket?.id || null
+  }
 
   disconnect() { if (this.socket) { this.socket.disconnect(); this.socket = null } }
 

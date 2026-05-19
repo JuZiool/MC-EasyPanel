@@ -68,21 +68,65 @@ class ApiClient {
 
   // Files
   async listFiles(path: string, page = 1, pageSize = 50) { return this.get<FileListResponse>('/files/list', { params: { path, page, pageSize } }) }
+  async searchFiles(path: string, query: string) { return this.get<{ name: string; path: string; type: 'file' | 'directory'; size: number; modified: string }[]>('/files/search', { params: { path, query } }) }
   async readFile(path: string) { return this.get<{ content: string; encoding?: string }>('/files/read', { params: { path } }) }
   async saveFile(path: string, content: string, encoding?: string) { return this.post('/files/save', { path, content, encoding }) }
   async deleteFile(path: string) { return this.post('/files/delete', { path }) }
   async createDirectory(path: string) { return this.post('/files/mkdir', { path }) }
   async renameFile(path: string, newPath: string) { return this.post('/files/rename', { path, newPath }) }
-  async copyFile(path: string, destPath: string) { return this.post('/files/copy', { path, destPath }) }
+  async copyFile(path: string, destPath: string, operationId?: string, socketId?: string) {
+    return this.post('/files/copy', { path, destPath, operationId, socketId })
+  }
   async moveFile(path: string, destPath: string) { return this.post('/files/move', { path, destPath }) }
+
+  async uploadFiles(path: string, files: FileList, onProgress?: (progress: number) => void) {
+    const formData = new FormData()
+    formData.append('path', path)
+    Array.from(files).forEach(f => formData.append('files', f))
+    return this.post('/files/upload', formData, {
+      onUploadProgress: (e) => {
+        if (onProgress && e.total) onProgress(Math.round((e.loaded / e.total) * 100))
+      }
+    })
+  }
+
+  async downloadFile(filePath: string, fileName: string, onProgress?: (progress: number) => void) {
+    try {
+      const res = await this.client.get('/files/download', {
+        params: { path: filePath },
+        responseType: 'blob',
+        onDownloadProgress: (e) => {
+          if (onProgress && e.total) onProgress(Math.round((e.loaded / e.total) * 100))
+        }
+      })
+      const url = URL.createObjectURL(new Blob([res.data]))
+      const a = document.createElement('a')
+      a.href = url
+      a.download = fileName
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+      return { success: true }
+    } catch (e: any) {
+      return { success: false, message: e.message || '下载失败' }
+    }
+  }
 
   // System
   async getSystemStats() { return this.get<SystemStats>('/system/stats') }
   async getSystemInfo() { return this.get('/system/info') }
 
   // Archive
-  async compressFile(path: string) { return this.post('/files/compress', { path }) }
-  async extractFile(path: string, destPath?: string) { return this.post('/files/extract', { path, destPath }) }
+  async compressFile(path: string, operationId?: string, socketId?: string) {
+    return this.post('/files/compress', { path, operationId, socketId })
+  }
+  async extractFile(path: string, operationId?: string, socketId?: string, destPath?: string) {
+    return this.post('/files/extract', { path, operationId, socketId, destPath })
+  }
+  async compressBatch(paths: string[], name: string, operationId?: string, socketId?: string) {
+    return this.post('/files/compress-batch', { paths, name, operationId, socketId })
+  }
 }
 
 export default new ApiClient()
