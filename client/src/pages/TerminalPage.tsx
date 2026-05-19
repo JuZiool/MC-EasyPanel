@@ -115,7 +115,7 @@ export default function TerminalPage() {
             : <span className="text-xs text-gray-500 italic">← 历史日志（只读）</span>
         )}
       </div>
-      <div ref={terminalRef} className="w-full aspect-[4/3] rounded-xl overflow-hidden border border-surface-200 max-h-[calc(100vh-14rem)]" />
+      <div ref={terminalRef} className="w-full aspect-[4/5] rounded-xl overflow-hidden border border-surface-200 max-h-[calc(100vh-12rem)]" />
     </div>
   )
 }
