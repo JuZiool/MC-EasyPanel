@@ -12,6 +12,11 @@ cd Mc-EasyPanel
 docker compose up --build -d
 ```
 
+> **⚠️ Linux 部署注意**：首次部署后需给 volume 挂载目录设置权限，否则容器内可能无法读写：
+> ```bash
+> chmod -R 777 data servers
+> ```
+
 ## 功能
 
 - **实例管理** — 创建/启动/停止/重启 MC 服务端实例
