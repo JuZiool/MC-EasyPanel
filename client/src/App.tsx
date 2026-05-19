@@ -10,6 +10,7 @@ import InstancesPage from './pages/InstancesPage'
 import FileManagerPage from './pages/FileManagerPage'
 import TerminalPage from './pages/TerminalPage'
 import SettingsPage from './pages/SettingsPage'
+import AboutPage from './pages/AboutPage'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuthStore()
@@ -42,6 +43,7 @@ export default function App() {
               <Route path="/files" element={<PageTransition><FileManagerPage /></PageTransition>} />
               <Route path="/terminal" element={<PageTransition><TerminalPage /></PageTransition>} />
               <Route path="/settings" element={<PageTransition><SettingsPage /></PageTransition>} />
+              <Route path="/about" element={<PageTransition><AboutPage /></PageTransition>} />
             </Routes>
           </Layout>
         </ProtectedRoute>

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
-import { Server, LayoutDashboard, Globe, Terminal, FileText, Settings, LogOut, Menu, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Server, LayoutDashboard, Globe, Terminal, FileText, Settings, Info, LogOut, Menu, ChevronLeft, ChevronRight } from 'lucide-react'
 
 const navItems = [
   { label: '仪表盘', icon: LayoutDashboard, path: '/' },
@@ -9,6 +9,7 @@ const navItems = [
   { label: '文件管理', icon: FileText, path: '/files' },
   { label: '终端', icon: Terminal, path: '/terminal' },
   { label: '设置', icon: Settings, path: '/settings' },
+  { label: '关于', icon: Info, path: '/about' },
 ]
 
 export default function Layout({ children }: { children: React.ReactNode }) {
