@@ -10,7 +10,7 @@ import { collectFiles, emitProgress } from '../utils/progressTracker.js'
 const router = Router()
 router.use(authenticateToken)
 
-const upload = multer({ dest: os.tmpdir() + '/mc-easypanel-uploads', limits: { fileSize: 1024 * 1024 * 1024 } })
+const upload = multer({ dest: os.tmpdir() + '/mc-easypanel-uploads' })
 
 function isValidPath(p: string): boolean {
   return path.isAbsolute(p) && !p.includes('..')
