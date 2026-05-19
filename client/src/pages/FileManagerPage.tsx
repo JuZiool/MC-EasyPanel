@@ -537,7 +537,28 @@ export default function FileManagerPage() {
             <button onClick={() => { handleDownload(contextMenu.file.path, contextMenu.file.name); setContextMenu(null) }}
               className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-surface-50"><Download className="w-4 h-4" />下载</button>
           )}
-          <button onClick={() => { navigator.clipboard.writeText(contextMenu.file.path); addNotification({ type: 'success', title: '已复制路径', message: contextMenu.file.path }); setContextMenu(null) }}
+          <button onClick={() => {
+              const path = contextMenu.file.path
+              navigator.clipboard.writeText(path).then(() => {
+                addNotification({ type: 'success', title: '已复制路径', message: path })
+              }).catch(() => {
+                // 降级方案：使用 execCommand（Linux HTTP 环境下 clipboard API 不可用时）
+                try {
+                  const ta = document.createElement('textarea')
+                  ta.value = path
+                  ta.style.position = 'fixed'
+                  ta.style.opacity = '0'
+                  document.body.appendChild(ta)
+                  ta.select()
+                  document.execCommand('copy')
+                  document.body.removeChild(ta)
+                  addNotification({ type: 'success', title: '已复制路径', message: path })
+                } catch {
+                  addNotification({ type: 'error', title: '复制失败', message: '无法访问剪贴板，请手动复制' })
+                }
+              })
+              setContextMenu(null)
+            }}
             className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-surface-50"><Link className="w-4 h-4" />复制容器内路径</button>
           <button onClick={() => { setRenameTarget({ path: contextMenu.file.path, name: contextMenu.file.name }); setRenameValue(contextMenu.file.name); setContextMenu(null) }}
             className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-surface-50"><Edit className="w-4 h-4" />重命名</button>
