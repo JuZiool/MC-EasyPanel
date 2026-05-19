@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion'
-import { Info, Globe, Server, Database, Cpu, Wifi, Shield, Layers } from 'lucide-react'
+import { Info, Globe, Server, Database, Cpu, Wifi, Shield, Layers, Terminal, LineChart, FileSearch } from 'lucide-react'
 
 const techStack = [
   { icon: Globe, label: '前端框架', value: 'React 18 + TypeScript', desc: '基于 Vite 构建' },
@@ -7,6 +7,9 @@ const techStack = [
   { icon: Wifi, label: '实时通信', value: 'Socket.IO', desc: 'WebSocket 双向通信' },
   { icon: Database, label: '状态管理', value: 'Zustand', desc: '轻量级状态管理' },
   { icon: Layers, label: '样式方案', value: 'Tailwind CSS', desc: '原子化 CSS 框架' },
+  { icon: Terminal, label: 'Web 终端', value: 'xterm.js + node-pty', desc: '实时交互式终端' },
+  { icon: Shield, label: '认证方案', value: 'JWT + bcryptjs', desc: 'Token 认证与密码加密' },
+  { icon: LineChart, label: '玩家统计', value: 'MC Query 协议', desc: '在线人数记录与图表' },
   { icon: Cpu, label: '包管理', value: 'Monorepo', desc: 'Root + Client + Server 结构' },
 ]
 
@@ -28,8 +31,8 @@ export default function AboutPage() {
         </div>
         <p className="text-sm text-gray-600 leading-relaxed">
           Mc-EasyPanel 是一个轻量级 Minecraft 服务器管理面板，提供实例管理、文件管理、终端访问等核心功能。
-          本项目基于 <strong>GSM3</strong>（Game Server Manager 3）项目进行精简与重构，专注于 Minecraft 服务器的
-          运维场景，移除了 GSM3 中泛化的多游戏类型支持，保留了最核心的实例生命周期管理与远程操作能力。
+          项目参考 <strong>GSM3</strong>（Game Server Manager 3）的架构模式重新实现，专注于 Minecraft 服务器
+          的运维场景，采用纯 Tailwind CSS 样式与 Monorepo 结构，适合个人或小团队管理 MC 服务端。
         </p>
       </motion.div>
 
