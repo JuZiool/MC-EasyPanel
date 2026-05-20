@@ -4,7 +4,7 @@ services:
     build: .                              # 使用当前目录的 Dockerfile 构建
     container_name: mc-easypanel          # 容器名称
     ports:
-      - "3001:3001"                       # 面板 Web 端口
+      - "3301:3001"                       # 面板 Web 端口
       - "25565:25565"                     # Minecraft 服务器端口
     volumes:
       - ./data:/app/server/data           # 面板数据（实例配置、用户信息等）
