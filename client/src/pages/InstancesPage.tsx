@@ -8,7 +8,7 @@ import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
 import LoadingSpinner from '../components/LoadingSpinner'
 import PlayerChart from '../components/PlayerChart'
 import type { Instance, PlayerSession } from '../types'
-import { Plus, Play, Square, Terminal, Folder, Trash2, Server, BarChart3, Users } from 'lucide-react'
+import { Plus, Play, Square, Terminal, Folder, Trash2, Server, BarChart3, Users, Pencil } from 'lucide-react'
 
 export default function InstancesPage() {
   const { instances, loading, fetchInstances } = useInstanceStore()
@@ -17,6 +17,9 @@ export default function InstancesPage() {
   const [showCreate, setShowCreate] = useState(false)
   const [createAnimating, setCreateAnimating] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
+  const [renameTarget, setRenameTarget] = useState<string | null>(null)
+  const [renameAnimating, setRenameAnimating] = useState(false)
+  const [renameName, setRenameName] = useState('')
   const [form, setForm] = useState<{ name: string; description: string; workingDirectory: string; startCommand: string; autoStart: boolean; stopCommand: Instance['stopCommand'] }>({ name: '', description: '', workingDirectory: '', startCommand: '', autoStart: false, stopCommand: 'stop' })
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [expandedCharts, setExpandedCharts] = useState<Set<string>>(new Set())
@@ -124,6 +127,22 @@ export default function InstancesPage() {
     setDeleteTarget(null)
   }
 
+  const openRename = (id: string, currentName: string) => {
+    setRenameName(currentName)
+    setRenameTarget(id)
+    setTimeout(() => setRenameAnimating(true), 10)
+  }
+  const closeRename = () => {
+    setRenameAnimating(false)
+    setTimeout(() => setRenameTarget(null), 300)
+  }
+  const handleRename = async () => {
+    if (!renameTarget || !renameName.trim()) return
+    const res = await apiClient.updateInstance(renameTarget, { name: renameName.trim() })
+    if (res.success) { addNotification({ type: 'success', title: '已重命名' }); fetchInstances(); closeRename() }
+    else addNotification({ type: 'error', title: '重命名失败', message: res.message })
+  }
+
   const statusColors: Record<string, string> = { running: 'bg-green-500', stopped: 'bg-gray-300', starting: 'bg-yellow-400', stopping: 'bg-yellow-400', error: 'bg-red-500' }
 
   return (
@@ -169,6 +188,7 @@ export default function InstancesPage() {
                     )}
                     <button onClick={() => navigate(`/terminal?instance=${inst.id}`)} className="p-2 rounded-lg text-gray-500 hover:bg-surface-50 transition-colors" title="终端"><Terminal className="w-4 h-4" /></button>
                     <button onClick={() => navigate(`/files?path=${encodeURIComponent(inst.workingDirectory)}`)} className="p-2 rounded-lg text-gray-500 hover:bg-surface-50 transition-colors" title="文件"><Folder className="w-4 h-4" /></button>
+                    <button onClick={() => openRename(inst.id, inst.name)} className="p-2 rounded-lg text-gray-500 hover:bg-surface-50 transition-colors" title="重命名"><Pencil className="w-4 h-4" /></button>
                     <button onClick={() => setDeleteTarget(inst.id)} className="p-2 rounded-lg text-red-400 hover:bg-red-50 transition-colors" title="删除"><Trash2 className="w-4 h-4" /></button>
                   </div>
                 </div>
@@ -272,6 +292,26 @@ export default function InstancesPage() {
             <div className="flex justify-end gap-3 mt-6">
               <button onClick={closeCreate} className="px-4 py-2 rounded-lg text-gray-600 hover:bg-surface-100 transition-colors text-sm">取消</button>
               <button onClick={handleCreate} className="px-4 py-2 rounded-lg bg-primary-500 hover:bg-primary-600 text-white text-sm font-medium transition-colors">创建</button>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+
+      {/* 重命名弹窗 */}
+      {renameTarget && (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: renameAnimating ? 1 : 0 }} className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
+          <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: renameAnimating ? 1 : 0, scale: renameAnimating ? 1 : 0.95 }} className="bg-white rounded-2xl shadow-xl border border-surface-200 p-6 max-w-sm w-full">
+            <h2 className="text-lg font-semibold text-gray-800 mb-4">重命名实例</h2>
+            <div>
+              <label className="block text-sm font-medium text-gray-600 mb-1">实例名称</label>
+              <input type="text" value={renameName} onChange={e => setRenameName(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleRename()}
+                autoFocus
+                className="w-full px-3 py-2 rounded-lg border border-surface-200 bg-surface-50 focus:border-primary-400 focus:ring-2 focus:ring-primary-100 outline-none text-gray-700" />
+            </div>
+            <div className="flex justify-end gap-3 mt-6">
+              <button onClick={closeRename} className="px-4 py-2 rounded-lg text-gray-600 hover:bg-surface-100 transition-colors text-sm">取消</button>
+              <button onClick={handleRename} className="px-4 py-2 rounded-lg bg-primary-500 hover:bg-primary-600 text-white text-sm font-medium transition-colors">确认</button>
             </div>
           </motion.div>
         </motion.div>
