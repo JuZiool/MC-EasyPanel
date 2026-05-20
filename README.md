@@ -27,7 +27,7 @@ docker compose up --build -d
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `SERVER_PORT` | `3001` | 面板端口 |
+| `SERVER_PORT` | `3301` | 面板端口 |
 | `JWT_SECRET` | - | JWT 签名密钥（生产务必修改） |
 
 ## 技术栈
