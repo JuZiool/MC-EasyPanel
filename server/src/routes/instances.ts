@@ -2,8 +2,9 @@ import { Router } from 'express'
 import { authenticateToken, AuthenticatedRequest } from '../middleware/auth.js'
 import { queryMultipleInstancePlayers } from '../utils/mcQuery.js'
 import type { PlayerStatsRecorder } from '../utils/playerStatsRecorder.js'
+import type { PlayerSessionTracker } from '../utils/playerSessionTracker.js'
 
-export function setupInstanceRoutes(instanceManager: any, playerStatsRecorder?: PlayerStatsRecorder) {
+export function setupInstanceRoutes(instanceManager: any, playerStatsRecorder?: PlayerStatsRecorder, playerSessionTracker?: PlayerSessionTracker) {
   const router = Router()
   router.use(authenticateToken)
 
@@ -48,6 +49,14 @@ export function setupInstanceRoutes(instanceManager: any, playerStatsRecorder?: 
     if (!inst) return res.status(404).json({ success: false, message: '实例不存在' })
     const history = playerStatsRecorder ? playerStatsRecorder.getHistory(req.params.id) : []
     res.json({ success: true, data: history })
+  })
+
+  // 获取实例的当前在线玩家及会话时长
+  router.get('/:id/player-sessions', (req: AuthenticatedRequest, res) => {
+    const inst = instanceManager.getInstance(req.params.id)
+    if (!inst) return res.status(404).json({ success: false, message: '实例不存在' })
+    const sessions = playerSessionTracker ? playerSessionTracker.getActiveSessions(req.params.id) : []
+    res.json({ success: true, data: sessions })
   })
 
   router.post('/', (req: AuthenticatedRequest, res) => {

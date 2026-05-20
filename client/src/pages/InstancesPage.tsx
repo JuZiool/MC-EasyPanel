@@ -7,8 +7,8 @@ import apiClient from '../utils/api'
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
 import LoadingSpinner from '../components/LoadingSpinner'
 import PlayerChart from '../components/PlayerChart'
-import type { Instance } from '../types'
-import { Plus, Play, Square, Terminal, Folder, Trash2, Server, BarChart3 } from 'lucide-react'
+import type { Instance, PlayerSession } from '../types'
+import { Plus, Play, Square, Terminal, Folder, Trash2, Server, BarChart3, Users } from 'lucide-react'
 
 export default function InstancesPage() {
   const { instances, loading, fetchInstances } = useInstanceStore()
@@ -21,8 +21,43 @@ export default function InstancesPage() {
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [expandedCharts, setExpandedCharts] = useState<Set<string>>(new Set())
   const [chartData, setChartData] = useState<Record<string, any>>({})
+  const [playerSessions, setPlayerSessions] = useState<Record<string, PlayerSession[]>>({})
+  const [initLoaded, setInitLoaded] = useState(false)
 
   useEffect(() => { fetchInstances() }, [])
+
+  // 实例加载完成后默认展开所有图表并加载数据
+  useEffect(() => {
+    if (instances.length > 0 && !initLoaded) {
+      setInitLoaded(true)
+      const all = new Set(instances.map(i => i.id))
+      setExpandedCharts(all)
+
+      const loadAll = async () => {
+        const results = await Promise.all(instances.map(async (inst) => {
+          const [chartRes, sessionRes] = await Promise.all([
+            apiClient.get(`/instances/${inst.id}/player-stats`),
+            apiClient.getInstancePlayerSessions(inst.id)
+          ])
+          return {
+            id: inst.id,
+            chartData: chartRes.data,
+            sessions: (sessionRes.data as PlayerSession[]) || []
+          }
+        }))
+
+        const chartMap: Record<string, any> = {}
+        const sessionMap: Record<string, PlayerSession[]> = {}
+        for (const r of results) {
+          if (r.chartData) chartMap[r.id] = r.chartData
+          if (r.sessions) sessionMap[r.id] = r.sessions
+        }
+        setChartData(chartMap)
+        setPlayerSessions(sessionMap)
+      }
+      loadAll()
+    }
+  }, [instances, initLoaded])
 
   const toggleChart = async (id: string) => {
     const next = new Set(expandedCharts)
@@ -36,8 +71,23 @@ export default function InstancesPage() {
           setChartData(prev => ({ ...prev, [id]: res.data }))
         }
       }
+      if (!playerSessions[id]) {
+        const res = await apiClient.getInstancePlayerSessions(id)
+        if (res.success && res.data) {
+          setPlayerSessions(prev => ({ ...prev, [id]: res.data as PlayerSession[] }))
+        }
+      }
     }
     setExpandedCharts(next)
+  }
+
+  const formatPlayerDuration = (firstSeen: string) => {
+    const diff = Date.now() - new Date(firstSeen).getTime()
+    const h = Math.floor(diff / 3600000)
+    const m = Math.floor((diff % 3600000) / 60000)
+    if (h > 0) return `${h}时${m}分`
+    if (m > 0) return `${m}分`
+    return '刚刚'
   }
 
   const openCreate = () => { setShowCreate(true); setTimeout(() => setCreateAnimating(true), 10) }
@@ -122,19 +172,48 @@ export default function InstancesPage() {
                     <button onClick={() => setDeleteTarget(inst.id)} className="p-2 rounded-lg text-red-400 hover:bg-red-50 transition-colors" title="删除"><Trash2 className="w-4 h-4" /></button>
                   </div>
                 </div>
-                {/* 展开的折线图区域 */}
+                {/* 展开的折线图区域（左侧图表 + 右侧在线玩家） */}
                 <AnimatePresence>
                   {showChart && (
                     <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }}
                       exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
                       <div className="px-5 pb-4 pt-0 border-t border-surface-100">
-                        <div className="pt-3">
-                          <h4 className="text-xs font-medium text-gray-500 mb-2">历史在线人数</h4>
-                          {data ? (
-                            <PlayerChart data={data} width={320} height={140} />
-                          ) : (
-                            <div className="text-xs text-gray-400 py-6 text-center">加载中...</div>
-                          )}
+                        <div className="pt-3 flex gap-4">
+                          {/* 左侧：历史在线人数图表 */}
+                          <div className="flex-1 min-w-0">
+                            <h4 className="text-xs font-medium text-gray-500 mb-2">历史在线人数</h4>
+                            {data ? (
+                              <PlayerChart data={data} width={400} height={140} />
+                            ) : (
+                              <div className="text-xs text-gray-400 py-6 text-center">加载中...</div>
+                            )}
+                          </div>
+                          {/* 右侧：当前在线玩家及在线时长 */}
+                          <div className="w-44 shrink-0 border-l border-surface-100 pl-4">
+                            <h4 className="text-xs font-medium text-gray-500 mb-2 flex items-center gap-1">
+                              <Users className="w-3 h-3" />在线玩家
+                            </h4>
+                            {playerSessions[inst.id] && playerSessions[inst.id].length > 0 ? (
+                              <div className="space-y-2">
+                                {playerSessions[inst.id].map((session) => {
+                                  const duration = formatPlayerDuration(session.firstSeen)
+                                  return (
+                                    <div key={session.playerId} className="flex items-center justify-between text-xs">
+                                      <span className="text-gray-700 flex items-center gap-1.5 truncate">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />
+                                        <span className="truncate">{session.playerName}</span>
+                                      </span>
+                                      <span className="text-gray-400 shrink-0 ml-2">{duration}</span>
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            ) : (
+                              <div className="flex items-center justify-center py-8 text-gray-300">
+                                <Users className="w-5 h-5" />
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </motion.div>

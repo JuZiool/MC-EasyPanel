@@ -14,7 +14,8 @@ import logBuffer from './utils/logBuffer.js'
 import systemRoutes from './routes/system.js'
 import filesRouter from './routes/files.js'
 import { PlayerStatsRecorder } from './utils/playerStatsRecorder.js'
-import { queryInstancePlayers } from './utils/mcQuery.js'
+import { PlayerSessionTracker } from './utils/playerSessionTracker.js'
+import { queryInstancePlayers, queryMultipleInstancePlayers } from './utils/mcQuery.js'
 
 dotenv.config()
 const PORT = parseInt(process.env.SERVER_PORT || '3001', 10)
@@ -60,6 +61,17 @@ const playerStatsRecorder = new PlayerStatsRecorder({
   }
 })
 playerStatsRecorder.start()
+
+// 玩家会话追踪器（追踪每个玩家的在线时长）
+const playerSessionTracker = new PlayerSessionTracker({
+  getInstances: () => instanceManager.getInstances(),
+  queryPlayers: async (instances) => {
+    return queryMultipleInstancePlayers(
+      instances.map(i => ({ id: i.id, name: i.name, workingDirectory: i.workingDirectory }))
+    )
+  }
+})
+playerSessionTracker.start()
 
 instanceManager.on('instance-status-changed', (data) => {
   io.emit('instance-status', data)
@@ -110,7 +122,7 @@ instanceManager.on('instance-force-stop', ({ id }) => {
 })
 
 app.use('/api/auth', setupAuthRoutes())
-app.use('/api/instances', setupInstanceRoutes(instanceManager, playerStatsRecorder))
+app.use('/api/instances', setupInstanceRoutes(instanceManager, playerStatsRecorder, playerSessionTracker))
 app.use('/api/system', systemRoutes)
 app.use('/api/files', filesRouter)
 

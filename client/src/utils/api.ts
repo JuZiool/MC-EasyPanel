@@ -72,6 +72,9 @@ class ApiClient {
   /** 查询所有运行中 Minecraft 实例的在线玩家信息 */
   async getInstancePlayers() { return this.get<Record<string, import('../types').ServerPlayerInfo>>('/instances/players') }
 
+  /** 查询实例的当前在线玩家及会话时长 */
+  async getInstancePlayerSessions(instanceId: string) { return this.get<import('../types').PlayerSession[]>(`/instances/${instanceId}/player-sessions`) }
+
   // Files
   async listFiles(path: string, page = 1, pageSize = 50) { return this.get<FileListResponse>('/files/list', { params: { path, page, pageSize } }) }
   async searchFiles(path: string, query: string) { return this.get<{ name: string; path: string; type: 'file' | 'directory'; size: number; modified: string }[]>('/files/search', { params: { path, query } }) }

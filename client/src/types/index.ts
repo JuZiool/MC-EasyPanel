@@ -83,6 +83,15 @@ export interface ServerPlayerInfo {
   error?: string
 }
 
+export interface PlayerSession {
+  playerName: string
+  playerId: string
+  instanceId: string
+  firstSeen: string
+  lastSeen: string
+  active: boolean
+}
+
 export interface Notification {
   id: string
   type: 'success' | 'error' | 'warning' | 'info'
