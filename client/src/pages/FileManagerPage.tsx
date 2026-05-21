@@ -452,7 +452,7 @@ export default function FileManagerPage() {
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="absolute inset-0 flex flex-col">
       <div className="shrink-0 pb-3 space-y-3">
         <div className="flex items-center justify-between">
           <h1 className="text-xl font-semibold text-gray-800">文件管理</h1>
