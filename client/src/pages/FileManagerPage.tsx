@@ -47,6 +47,8 @@ export default function FileManagerPage() {
   const [permOthers, setPermOthers] = useState({ read: true, write: true, execute: true })
   const [permRecursive, setPermRecursive] = useState(false)
   const [permSaving, setPermSaving] = useState(false)
+  const [editingPath, setEditingPath] = useState(false)
+  const [editPathValue, setEditPathValue] = useState('')
 
   useEffect(() => {
     const pathParam = searchParams.get('path') || '/app/servers'
@@ -446,7 +448,25 @@ export default function FileManagerPage() {
 
         <div className="flex items-center gap-1 text-sm text-gray-500">
           <button onClick={goUp} className="p-1 hover:text-gray-700"><ArrowLeft className="w-4 h-4" /></button>
-          <span className="font-mono text-xs bg-surface-100 px-3 py-1.5 rounded-lg">{currentPath || '/'}</span>
+          {editingPath ? (
+            <input type="text" value={editPathValue} autoFocus
+              onChange={e => setEditPathValue(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && editPathValue.trim()) {
+                  setEditingPath(false)
+                  clearSearch()
+                  fetchFiles(editPathValue.trim())
+                }
+                if (e.key === 'Escape') setEditingPath(false)
+              }}
+              onBlur={() => setEditingPath(false)}
+              className="flex-1 font-mono text-xs bg-white border border-primary-300 px-3 py-1.5 rounded-lg outline-none text-gray-700" />
+          ) : (
+            <button onClick={() => { setEditPathValue(currentPath); setEditingPath(true) }}
+              className="flex-1 text-left font-mono text-xs bg-surface-100 hover:bg-surface-200 px-3 py-1.5 rounded-lg text-gray-600 transition-colors">
+              {currentPath || '/'}
+            </button>
+          )}
         </div>
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
