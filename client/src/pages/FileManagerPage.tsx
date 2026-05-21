@@ -452,8 +452,8 @@ export default function FileManagerPage() {
   }
 
   return (
-    <div className="flex flex-col h-full -m-4 lg:-m-6">
-      <div className="shrink-0 px-4 lg:px-6 pt-4 lg:pt-6 pb-3 space-y-3">
+    <div className="flex flex-col h-full">
+      <div className="shrink-0 pb-3 space-y-3">
         <div className="flex items-center justify-between">
           <h1 className="text-xl font-semibold text-gray-800">文件管理</h1>
           <div className="flex items-center gap-2">
@@ -501,7 +501,7 @@ export default function FileManagerPage() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-auto px-4 lg:px-6 pb-4">
+      <div className="flex-1 overflow-auto pb-4">
       {(() => {
         const isSearching = searchResults !== null
         const displayFiles = isSearching ? searchResults || [] : files
