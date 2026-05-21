@@ -84,10 +84,18 @@ export default function InstancesPage() {
     setExpandedCharts(next)
   }
 
-  const formatPlayerDuration = (firstSeen: string) => {
-    const diff = Date.now() - new Date(firstSeen).getTime()
-    const h = Math.floor(diff / 3600000)
-    const m = Math.floor((diff % 3600000) / 60000)
+  const getPlayerTotalDuration = (sessions: PlayerSession[]) => {
+    let total = 0
+    for (const s of sessions) {
+      const end = s.active ? Date.now() : new Date(s.lastSeen).getTime()
+      total += end - new Date(s.firstSeen).getTime()
+    }
+    return total
+  }
+
+  const formatDuration = (ms: number) => {
+    const h = Math.floor(ms / 3600000)
+    const m = Math.floor((ms % 3600000) / 60000)
     if (h > 0) return `${h}时${m}分`
     if (m > 0) return `${m}分`
     return '刚刚'
@@ -208,25 +216,35 @@ export default function InstancesPage() {
                               <div className="text-xs text-gray-400 py-6 text-center">加载中...</div>
                             )}
                           </div>
-                          {/* 右侧：当前在线玩家及在线时长 */}
+                          {/* 右侧：所有玩家及游玩时长 */}
                           <div className="w-44 shrink-0 border-l border-surface-100 pl-4">
                             <h4 className="text-xs font-medium text-gray-500 mb-2 flex items-center gap-1">
-                              <Users className="w-3 h-3" />在线玩家
+                              <Users className="w-3 h-3" />玩家
                             </h4>
                             {playerSessions[inst.id] && playerSessions[inst.id].length > 0 ? (
-                              <div className="space-y-2">
-                                {playerSessions[inst.id].map((session) => {
-                                  const duration = formatPlayerDuration(session.firstSeen)
-                                  return (
-                                    <div key={session.playerId} className="flex items-center justify-between text-xs">
-                                      <span className="text-gray-700 flex items-center gap-1.5 truncate">
-                                        <span className="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />
-                                        <span className="truncate">{session.playerName}</span>
-                                      </span>
-                                      <span className="text-gray-400 shrink-0 ml-2">{duration}</span>
-                                    </div>
-                                  )
-                                })}
+                              <div className="space-y-2 max-h-60 overflow-y-auto">
+                                {(() => {
+                                  // 按 playerId 聚合所有会话，计算累计总时长
+                                  const grouped: Record<string, PlayerSession[]> = {}
+                                  for (const s of playerSessions[inst.id]) {
+                                    if (!grouped[s.playerId]) grouped[s.playerId] = []
+                                    grouped[s.playerId].push(s)
+                                  }
+                                  return Object.entries(grouped).map(([playerId, sessions]) => {
+                                    const isOnline = sessions.some(s => s.active)
+                                    const totalMs = getPlayerTotalDuration(sessions)
+                                    const playerName = sessions[0].playerName
+                                    return (
+                                      <div key={playerId} className="flex items-center justify-between text-xs">
+                                        <span className={`flex items-center gap-1.5 truncate ${isOnline ? 'text-gray-700' : 'text-gray-400'}`}>
+                                          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isOnline ? 'bg-green-500' : 'bg-gray-300'}`} />
+                                          <span className={`truncate ${isOnline ? 'text-green-700' : 'text-gray-400'}`}>{playerName}</span>
+                                        </span>
+                                        <span className="text-gray-400 shrink-0 ml-2">{formatDuration(totalMs)}</span>
+                                      </div>
+                                    )
+                                  })
+                                })()}
                               </div>
                             ) : (
                               <div className="flex items-center justify-center py-8 text-gray-300">

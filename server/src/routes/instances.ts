@@ -51,11 +51,11 @@ export function setupInstanceRoutes(instanceManager: any, playerStatsRecorder?: 
     res.json({ success: true, data: history })
   })
 
-  // 获取实例的当前在线玩家及会话时长
+  // 获取实例的所有玩家会话记录（在线 + 历史）
   router.get('/:id/player-sessions', (req: AuthenticatedRequest, res) => {
     const inst = instanceManager.getInstance(req.params.id)
     if (!inst) return res.status(404).json({ success: false, message: '实例不存在' })
-    const sessions = playerSessionTracker ? playerSessionTracker.getActiveSessions(req.params.id) : []
+    const sessions = playerSessionTracker ? playerSessionTracker.getAllSessions(req.params.id) : []
     res.json({ success: true, data: sessions })
   })
 
