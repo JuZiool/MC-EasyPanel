@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef, useLayoutEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useFileStore } from '../stores/fileStore'
@@ -31,6 +31,8 @@ export default function FileManagerPage() {
   const [showNewDir, setShowNewDir] = useState(false)
   const [newName, setNewName] = useState('')
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const [menuPos, setMenuPos] = useState({ x: 0, y: 0 })
   const [renameTarget, setRenameTarget] = useState<{ path: string; name: string } | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const [compressExtract, setCompressExtract] = useState<{ path: string; name: string; mode: 'compress' | 'extract'; destPath?: string } | null>(null)
@@ -228,6 +230,20 @@ export default function FileManagerPage() {
     e.preventDefault()
     setContextMenu({ x: e.clientX, y: e.clientY, file })
   }, [])
+
+  useLayoutEffect(() => {
+    if (!contextMenu) return
+    const el = menuRef.current
+    if (!el) { setMenuPos({ x: contextMenu.x, y: contextMenu.y }); return }
+    const rect = el.getBoundingClientRect()
+    const ww = window.innerWidth
+    const wh = window.innerHeight
+    let x = contextMenu.x
+    let y = contextMenu.y
+    if (x + rect.width > ww) x = Math.max(0, x - rect.width)
+    if (y + rect.height > wh) y = Math.max(0, y - rect.height)
+    setMenuPos({ x, y })
+  }, [contextMenu])
 
   const handleRename = async () => {
     if (!renameTarget || !renameValue.trim()) return
@@ -615,9 +631,9 @@ export default function FileManagerPage() {
 
       <AnimatePresence>
       {contextMenu && (
-        <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
+        <motion.div ref={menuRef} initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
           className="fixed z-50 bg-white rounded-xl shadow-xl border border-surface-200 py-1 min-w-[160px]"
-          style={{ left: contextMenu.x, top: contextMenu.y }}>
+          style={{ left: menuPos.x, top: menuPos.y }}>
           {contextMenu.file.type === 'directory' ? (
             <button onClick={() => { navigateDir(contextMenu.file.path); setContextMenu(null) }}
               className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-surface-50"><ArrowLeft className="w-4 h-4" />打开</button>
