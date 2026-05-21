@@ -509,8 +509,8 @@ export default function FileManagerPage() {
 
         if (displayLoading) return <div className="text-center py-10 text-gray-400">{searching ? '搜索中...' : '加载中...'}</div>
         return (
-        <div className="bg-white rounded-xl border border-surface-200 overflow-hidden">
-          <div className="flex items-center gap-3 px-4 py-2 bg-surface-50 border-b border-surface-200 text-xs text-gray-500 font-medium">
+        <div className="bg-white rounded-xl border border-surface-200">
+          <div className="sticky top-0 z-10 flex items-center gap-3 px-4 py-2 bg-surface-50 border-b border-surface-200 text-xs text-gray-500 font-medium">
             {isSearching ? (
               <span className="flex-1">搜索结果 ({displayFiles.length} 项)</span>
             ) : (
@@ -523,7 +523,6 @@ export default function FileManagerPage() {
               <span className="w-16 text-right">权限</span>
               <span className="w-20 text-right">大小</span>
               <span className="w-32 text-right">修改时间</span>
-              <span className="w-20 text-right">操作</span>
               </>
             )}
           </div>
@@ -549,11 +548,6 @@ export default function FileManagerPage() {
               <span className={`text-xs font-mono w-16 text-right shrink-0 tabular-nums ${file.permissions === '777' ? 'text-green-600' : 'text-gray-500'}`}>{file.permissions || '-'}</span>
               <span className="text-xs text-gray-400 w-20 text-right shrink-0">{formatSize(file.size)}</span>
               <span className="text-xs text-gray-400 w-32 text-right shrink-0 hidden sm:block">{new Date(file.modified).toLocaleString()}</span>
-              <div className="flex items-center gap-1 w-20 justify-end shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                {file.type === 'file' && <button onClick={() => handleReadFile(file.path, file.name)} className="p-1.5 rounded text-gray-400 hover:text-blue-500 hover:bg-blue-50"><Edit3 className="w-3.5 h-3.5" /></button>}
-                <button onClick={() => handleDownload(file.path, file.name)} className="p-1.5 rounded text-gray-400 hover:text-green-500 hover:bg-green-50"><Download className="w-3.5 h-3.5" /></button>
-                <button onClick={() => setDeleteTarget({ path: file.path, name: file.name })} className="p-1.5 rounded text-gray-400 hover:text-red-500 hover:bg-red-50"><Trash2 className="w-3.5 h-3.5" /></button>
-              </div>
             </motion.div>
           ))}
           {displayFiles.length === 0 && <div className="text-center py-10 text-gray-400">{isSearching ? '未找到匹配的文件' : '目录为空'}</div>}
