@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useInstanceStore } from '../stores/instanceStore'
@@ -27,45 +27,48 @@ export default function InstancesPage() {
   const [chartData, setChartData] = useState<Record<string, any>>({})
   const [playerSessions, setPlayerSessions] = useState<Record<string, PlayerSession[]>>({})
   const [initLoaded, setInitLoaded] = useState(false)
+  const dataLoadedRef = useRef(false)
 
   useEffect(() => { fetchInstances() }, [])
 
-  // 实例加载完成后默认展开所有图表并加载数据
+  // 实例加载完成后默认展开所有图表
   useEffect(() => {
     if (instances.length > 0 && !initLoaded) {
       setInitLoaded(true)
       const all = new Set(instances.map(i => i.id))
       setExpandedCharts(all)
-
-      let cancelled = false
-      const loadAll = async () => {
-        const results = await Promise.all(instances.map(async (inst) => {
-          const [chartRes, sessionRes] = await Promise.all([
-            apiClient.get(`/instances/${inst.id}/player-stats`),
-            apiClient.getInstancePlayerSessions(inst.id)
-          ])
-          return {
-            id: inst.id,
-            chartData: chartRes.data,
-            sessions: (sessionRes.data as PlayerSession[]) || []
-          }
-        }))
-
-        if (cancelled) return
-
-        const chartMap: Record<string, any> = {}
-        const sessionMap: Record<string, PlayerSession[]> = {}
-        for (const r of results) {
-          if (r.chartData) chartMap[r.id] = r.chartData
-          if (r.sessions) sessionMap[r.id] = r.sessions
-        }
-        setChartData(chartMap)
-        setPlayerSessions(sessionMap)
-      }
-      loadAll()
-      return () => { cancelled = true }
     }
   }, [instances, initLoaded])
+
+  // 单独加载图表和玩家数据（与展开分离，避免 cancelled 竞态条件导致数据永不加载）
+  useEffect(() => {
+    if (instances.length === 0 || dataLoadedRef.current) return
+    dataLoadedRef.current = true
+
+    const loadAll = async () => {
+      const results = await Promise.all(instances.map(async (inst) => {
+        const [chartRes, sessionRes] = await Promise.all([
+          apiClient.get(`/instances/${inst.id}/player-stats`),
+          apiClient.getInstancePlayerSessions(inst.id)
+        ])
+        return {
+          id: inst.id,
+          chartData: chartRes.data,
+          sessions: (sessionRes.data as PlayerSession[]) || []
+        }
+      }))
+
+      const chartMap: Record<string, any> = {}
+      const sessionMap: Record<string, PlayerSession[]> = {}
+      for (const r of results) {
+        if (r.chartData) chartMap[r.id] = r.chartData
+        if (r.sessions) sessionMap[r.id] = r.sessions
+      }
+      setChartData(chartMap)
+      setPlayerSessions(sessionMap)
+    }
+    loadAll()
+  }, [instances])
 
   const toggleChart = async (id: string) => {
     const next = new Set(expandedCharts)
