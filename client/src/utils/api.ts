@@ -127,6 +127,33 @@ class ApiClient {
   async getSystemStats() { return this.get<SystemStats>('/system/stats') }
   async getSystemInfo() { return this.get('/system/info') }
 
+  // Permissions
+  async getFilePermissions(path: string) {
+    return this.get<{
+      owner: string
+      group: string
+      permissions: {
+        owner: { read: boolean; write: boolean; execute: boolean }
+        group: { read: boolean; write: boolean; execute: boolean }
+        others: { read: boolean; write: boolean; execute: boolean }
+      }
+      octal: string
+      isDirectory: boolean
+    }>('/files/permissions', { params: { path } })
+  }
+
+  async setFilePermissions(
+    path: string,
+    permissions: string | {
+      owner: { read: boolean; write: boolean; execute: boolean }
+      group: { read: boolean; write: boolean; execute: boolean }
+      others: { read: boolean; write: boolean; execute: boolean }
+    },
+    recursive?: boolean
+  ) {
+    return this.post('/files/permissions', { path, permissions, recursive })
+  }
+
   // Archive
   async compressFile(path: string, operationId?: string, socketId?: string) {
     return this.post('/files/compress', { path, operationId, socketId })

@@ -42,6 +42,7 @@ export interface FileItem {
   type: 'file' | 'directory'
   size: number
   modified: string
+  permissions?: string
 }
 
 export interface FilePagination {

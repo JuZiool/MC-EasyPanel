@@ -2,11 +2,15 @@ import { Router } from 'express'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
+import { exec } from 'child_process'
+import { promisify } from 'util'
 import multer from 'multer'
 import AdmZip from 'adm-zip'
 import { authenticateToken, authenticateTokenFlexible, AuthenticatedRequest } from '../middleware/auth.js'
 import { collectFiles, emitProgress } from '../utils/progressTracker.js'
 import { ChunkUploadManager } from '../modules/chunkUploadManager.js'
+
+const execAsync = promisify(exec)
 
 const router = Router()
 router.use(authenticateToken)
@@ -36,7 +40,8 @@ router.get('/list', (req: AuthenticatedRequest, res) => {
       try {
         const fullPath = path.join(dirPath, e.name)
         const stat = fs.statSync(fullPath)
-        return { name: e.name, path: fullPath, type: e.isDirectory() ? 'directory' : 'file', size: stat.size, modified: stat.mtime.toISOString() }
+        const perm = (stat.mode & 0o777).toString(8).padStart(3, '0')
+        return { name: e.name, path: fullPath, type: e.isDirectory() ? 'directory' : 'file', size: stat.size, modified: stat.mtime.toISOString(), permissions: perm }
       } catch { return null }
     }).filter(Boolean).sort((a: any, b: any) => {
       if (a.type !== b.type) return a.type === 'directory' ? -1 : 1
@@ -57,7 +62,7 @@ router.get('/search', (req: AuthenticatedRequest, res) => {
   try {
     if (!fs.existsSync(rootPath)) return res.status(404).json({ success: false, message: '路径不存在' })
     const maxDepth = parseInt(req.query.depth as string) || 5
-    const results: { name: string; path: string; type: 'file' | 'directory'; size: number; modified: string }[] = []
+    const results: { name: string; path: string; type: 'file' | 'directory'; size: number; modified: string; permissions: string }[] = []
 
     function walk(dir: string, depth: number) {
       if (depth > maxDepth) return
@@ -72,7 +77,8 @@ router.get('/search', (req: AuthenticatedRequest, res) => {
         }
         try {
           const stat = fs.statSync(fullPath)
-          results.push({ name: e.name, path: fullPath, type: e.isDirectory() ? 'directory' : 'file', size: stat.size, modified: stat.mtime.toISOString() })
+          const perm = (stat.mode & 0o777).toString(8).padStart(3, '0')
+          results.push({ name: e.name, path: fullPath, type: e.isDirectory() ? 'directory' : 'file', size: stat.size, modified: stat.mtime.toISOString(), permissions: perm })
         } catch { /* skip */ }
         if (e.isDirectory()) walk(fullPath, depth + 1)
       }
@@ -344,8 +350,8 @@ router.post('/extract', async (req: AuthenticatedRequest, res) => {
     let processed = 0
 
     for (const entry of entries) {
-      const fixedName = Buffer.from(entry.entryName, 'latin1').toString('utf8')
-      const targetPath = path.join(targetDir, fixedName)
+      // AdmZip 已自动处理 UTF-8 文件名编码，直接使用 entryName
+      const targetPath = path.join(targetDir, entry.entryName)
       const targetParent = path.dirname(targetPath)
       if (!fs.existsSync(targetParent)) fs.mkdirSync(targetParent, { recursive: true })
       if (!entry.isDirectory) {
@@ -559,6 +565,103 @@ router.delete('/upload/cancel/:uploadId', authenticateToken, async (req: Authent
   } catch (error: any) {
     console.error('Cancel upload error:', error)
     res.status(500).json({ success: false, message: error.message || '取消上传失败' })
+  }
+})
+
+// ============================================================
+// 文件权限路由（仅 Linux 系统支持）
+// ============================================================
+
+// 获取文件/目录权限信息
+router.get('/permissions', authenticateToken, async (req: AuthenticatedRequest, res) => {
+  try {
+    if (process.platform === 'win32') {
+      return res.status(400).json({ success: false, message: 'Windows 系统不支持此功能' })
+    }
+    const filePath = req.query.path as string
+    if (!filePath || !isValidPath(filePath)) {
+      return res.status(400).json({ success: false, message: '无效的路径' })
+    }
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ success: false, message: '文件或目录不存在' })
+    }
+    const stats = fs.statSync(filePath)
+    const { stdout } = await execAsync(`stat -c "%a %U %G" "${filePath}"`)
+    const [octalPermissions, owner, group] = stdout.trim().split(' ')
+
+    const parseOctalPermissions = (octal: string) => {
+      const ownerPerms = parseInt(octal[0])
+      const groupPerms = parseInt(octal[1])
+      const othersPerms = parseInt(octal[2])
+      const parsePermBits = (bits: number) => ({
+        read: (bits & 4) !== 0,
+        write: (bits & 2) !== 0,
+        execute: (bits & 1) !== 0
+      })
+      return {
+        owner: parsePermBits(ownerPerms),
+        group: parsePermBits(groupPerms),
+        others: parsePermBits(othersPerms)
+      }
+    }
+
+    res.json({
+      success: true,
+      data: {
+        owner,
+        group,
+        permissions: parseOctalPermissions(octalPermissions),
+        octal: octalPermissions,
+        isDirectory: stats.isDirectory(),
+        size: stats.size,
+        modified: stats.mtime.toISOString()
+      }
+    })
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: error.message })
+  }
+})
+
+// 修改文件/目录权限
+router.post('/permissions', authenticateToken, async (req: AuthenticatedRequest, res) => {
+  try {
+    if (process.platform === 'win32') {
+      return res.status(400).json({ success: false, message: 'Windows 系统不支持此功能' })
+    }
+    const { path: filePath, permissions, recursive } = req.body
+    if (!filePath || !isValidPath(filePath)) {
+      return res.status(400).json({ success: false, message: '无效的路径' })
+    }
+    if (!permissions) {
+      return res.status(400).json({ success: false, message: '权限参数不能为空' })
+    }
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ success: false, message: '文件或目录不存在' })
+    }
+
+    // 支持八进制字符串 "777" 或对象 {owner, group, others}
+    let octalPermissions: string
+    if (typeof permissions === 'string' && /^[0-7]{3,4}$/.test(permissions)) {
+      octalPermissions = permissions
+    } else if (typeof permissions === 'object' && permissions.owner && permissions.group && permissions.others) {
+      const convertPermBits = (perms: { read: boolean; write: boolean; execute: boolean }) =>
+        (perms.read ? 4 : 0) + (perms.write ? 2 : 0) + (perms.execute ? 1 : 0)
+      const ownerBits = convertPermBits(permissions.owner)
+      const groupBits = convertPermBits(permissions.group)
+      const othersBits = convertPermBits(permissions.others)
+      octalPermissions = `${ownerBits}${groupBits}${othersBits}`
+    } else {
+      return res.status(400).json({ success: false, message: '权限格式无效，请使用 "777" 或 {owner:{read,write,execute},...}' })
+    }
+
+    const chmodCommand = recursive
+      ? `chmod -R ${octalPermissions} "${filePath}"`
+      : `chmod ${octalPermissions} "${filePath}"`
+    await execAsync(chmodCommand)
+
+    res.json({ success: true, message: '权限修改成功', data: { octal: octalPermissions } })
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: error.message })
   }
 })
 

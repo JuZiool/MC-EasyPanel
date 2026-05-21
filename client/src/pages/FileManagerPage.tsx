@@ -10,7 +10,7 @@ import socketClient from '../utils/socket'
 import MonacoEditor from '../components/MonacoEditor'
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
 import ProgressPanel from '../components/ProgressPanel'
-import { ArrowLeft, Upload, FilePlus, FolderPlus, RefreshCw, Download, Edit3, Trash2, FileText, Folder, Copy, Scissors, Edit, FileArchive, CheckSquare, Square, Link, Search, X } from 'lucide-react'
+import { ArrowLeft, Upload, FilePlus, FolderPlus, RefreshCw, Download, Edit3, Trash2, FileText, Folder, Copy, Scissors, Edit, FileArchive, CheckSquare, Square, Link, Search, X, Shield } from 'lucide-react'
 
 interface ContextMenu {
   x: number; y: number; file: { path: string; name: string; type: 'file' | 'directory' }
@@ -39,8 +39,14 @@ export default function FileManagerPage() {
   const [batchDelete, setBatchDelete] = useState(false)
   const [clipboard, setClipboard] = useState<{ paths: string[]; action: 'copy' | 'cut' } | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
-  const [searchResults, setSearchResults] = useState<{ name: string; path: string; type: 'file' | 'directory'; size: number; modified: string }[] | null>(null)
+  const [searchResults, setSearchResults] = useState<import('../types').FileItem[] | null>(null)
   const [searching, setSearching] = useState(false)
+  const [permDialog, setPermDialog] = useState<{ path: string; name: string; type: 'file' | 'directory' } | null>(null)
+  const [permOwner, setPermOwner] = useState({ read: true, write: true, execute: true })
+  const [permGroup, setPermGroup] = useState({ read: true, write: true, execute: true })
+  const [permOthers, setPermOthers] = useState({ read: true, write: true, execute: true })
+  const [permRecursive, setPermRecursive] = useState(false)
+  const [permSaving, setPermSaving] = useState(false)
 
   useEffect(() => {
     const pathParam = searchParams.get('path') || '/app/servers'
@@ -131,6 +137,19 @@ export default function FileManagerPage() {
   const goUp = () => { const parent = currentPath.split('/').slice(0, -1).join('/') || '/'; fetchFiles(parent) }
 
   const handleReadFile = async (filePath: string, fileName: string) => {
+    // 二进制/压缩文件不读取内容（避免卡死）
+    const binaryExts = ['.jar', '.zip', '.gz', '.tar', '.7z', '.rar', '.bz2', '.xz', '.class', '.exe', '.dll', '.so', '.dylib', '.bin', '.dat']
+    const ext = fileName.substring(fileName.lastIndexOf('.')).toLowerCase()
+    if (binaryExts.includes(ext)) {
+      addNotification({ type: 'info', title: '无法预览', message: `${ext} 文件为二进制格式，不支持在线编辑` })
+      return
+    }
+    // 大文件不读取（超过 5MB）
+    const file = files.find(f => f.path === filePath)
+    if (file && file.size > 5 * 1024 * 1024) {
+      addNotification({ type: 'info', title: '文件过大', message: '超过 5MB 的文件不支持在线编辑，请下载后编辑' })
+      return
+    }
     const res = await apiClient.readFile(filePath)
     if (res.success && res.data) setEditFile({ path: filePath, content: res.data.content, name: fileName })
     else addNotification({ type: 'error', title: '读取失败', message: res.message })
@@ -342,6 +361,51 @@ export default function FileManagerPage() {
     setTimeout(() => removeItem(opId), 3000)
   }
 
+  const handleOpenPermission = async () => {
+    if (selectedPaths.size === 0) return
+    // 只对第一个选中项打开权限编辑
+    const firstPath = Array.from(selectedPaths)[0]
+    const file = files.find(f => f.path === firstPath)
+    if (!file) return
+    setPermDialog({ path: file.path, name: file.name, type: file.type })
+    // 读取当前权限
+    const res = await apiClient.getFilePermissions(file.path)
+    if (res.success && res.data) {
+      setPermOwner(res.data.permissions.owner)
+      setPermGroup(res.data.permissions.group)
+      setPermOthers(res.data.permissions.others)
+      setPermRecursive(false)
+    } else {
+      // 默认 777
+      setPermOwner({ read: true, write: true, execute: true })
+      setPermGroup({ read: true, write: true, execute: true })
+      setPermOthers({ read: true, write: true, execute: true })
+      setPermRecursive(false)
+    }
+  }
+
+  const getOctalFromPerms = (owner: typeof permOwner, group: typeof permGroup, others: typeof permOthers) => {
+    const toBits = (p: typeof owner) => (p.read ? 4 : 0) + (p.write ? 2 : 0) + (p.execute ? 1 : 0)
+    return `${toBits(owner)}${toBits(group)}${toBits(others)}`
+  }
+
+  const handleSavePermission = async () => {
+    if (!permDialog) return
+    setPermSaving(true)
+    const res = await apiClient.setFilePermissions(
+      permDialog.path,
+      { owner: permOwner, group: permGroup, others: permOthers },
+      permDialog.type === 'directory' ? permRecursive : undefined
+    )
+    setPermSaving(false)
+    if (res.success) {
+      addNotification({ type: 'success', title: '权限修改成功', message: (res.data as any)?.octal ? `权限: ${(res.data as any).octal}` : undefined })
+      setPermDialog(null)
+    } else {
+      addNotification({ type: 'error', title: '权限修改失败', message: res.message })
+    }
+  }
+
   const handleDownload = async (filePath: string, fileName: string) => {
     const opId = genOpId()
     addItem({ id: opId, type: 'download', label: `下载: ${fileName}`, progress: 0, status: 'active' })
@@ -415,6 +479,7 @@ export default function FileManagerPage() {
               </button>
               <span className="w-4 shrink-0" />
               <span className="flex-1">名称</span>
+              <span className="w-16 text-right">权限</span>
               <span className="w-20 text-right">大小</span>
               <span className="w-32 text-right">修改时间</span>
               <span className="w-20 text-right">操作</span>
@@ -440,6 +505,7 @@ export default function FileManagerPage() {
               {isSearching && (
                 <span className="text-xs text-gray-400 truncate max-w-[200px] hidden sm:block font-mono">{file.path.replace(currentPath, '')}</span>
               )}
+              <span className={`text-xs font-mono w-16 text-right shrink-0 tabular-nums ${file.permissions === '777' ? 'text-green-600' : 'text-gray-500'}`}>{file.permissions || '-'}</span>
               <span className="text-xs text-gray-400 w-20 text-right shrink-0">{formatSize(file.size)}</span>
               <span className="text-xs text-gray-400 w-32 text-right shrink-0 hidden sm:block">{new Date(file.modified).toLocaleString()}</span>
               <div className="flex items-center gap-1 w-20 justify-end shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -462,6 +528,7 @@ export default function FileManagerPage() {
           <button onClick={() => handleCopyToClipboard('copy')} className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-600 hover:bg-surface-100 rounded-lg transition-colors"><Copy className="w-4 h-4" />复制</button>
           <button onClick={() => handleCopyToClipboard('cut')} className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-600 hover:bg-surface-100 rounded-lg transition-colors"><Scissors className="w-4 h-4" />剪切</button>
           <button onClick={handleBatchCompress} className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-600 hover:bg-surface-100 rounded-lg transition-colors"><FileArchive className="w-4 h-4" />压缩</button>
+          <button onClick={() => handleOpenPermission()} className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-600 hover:bg-surface-100 rounded-lg transition-colors"><Shield className="w-4 h-4" />权限</button>
           <button onClick={() => setBatchDelete(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors"><Trash2 className="w-4 h-4" />删除</button>
           <button onClick={() => setSelectedPaths(new Set())} className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-400 hover:text-gray-600 hover:bg-surface-100 rounded-lg transition-colors">取消</button>
         </motion.div>
@@ -638,6 +705,88 @@ export default function FileManagerPage() {
               <button onClick={compressExtract.mode === 'compress' ? handleCompress : handleExtract}
                 className="px-4 py-2 bg-primary-500 hover:bg-primary-600 text-white rounded-lg text-sm font-medium">
                 {compressExtract.mode === 'compress' ? '压缩' : '解压'}
+              </button>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+
+      {permDialog && (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4" onClick={() => !permSaving && setPermDialog(null)}>
+          <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} className="bg-white rounded-2xl shadow-xl border border-surface-200 w-full max-w-md" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-6 py-4 border-b border-surface-200">
+              <div className="flex items-center gap-2">
+                <Shield className="w-5 h-5 text-primary-500" />
+                <h3 className="font-medium text-gray-800">权限设置</h3>
+              </div>
+              <span className="text-sm text-gray-500 truncate max-w-[200px] font-mono">{permDialog.name}</span>
+            </div>
+            <div className="px-6 py-4 space-y-5">
+              {/* 权限位网格 */}
+              <div className="space-y-3">
+                {/* 表头 */}
+                <div className="grid grid-cols-[80px_repeat(3,1fr)] gap-2 text-xs text-gray-500 font-medium">
+                  <span />
+                  <span className="text-center">读取</span>
+                  <span className="text-center">写入</span>
+                  <span className="text-center">执行</span>
+                </div>
+                {/* Owner 行 */}
+                <div className="grid grid-cols-[80px_repeat(3,1fr)] gap-2 items-center">
+                  <span className="text-sm text-gray-700 font-medium">所有者</span>
+                  {(['read','write','execute'] as const).map(key => (
+                    <label key={`o-${key}`} className="flex justify-center cursor-pointer">
+                      <input type="checkbox" checked={permOwner[key]} onChange={() => setPermOwner(p => ({ ...p, [key]: !p[key] }))}
+                        className="w-4 h-4 text-primary-500 border-surface-300 rounded focus:ring-primary-400" />
+                    </label>
+                  ))}
+                </div>
+                {/* Group 行 */}
+                <div className="grid grid-cols-[80px_repeat(3,1fr)] gap-2 items-center">
+                  <span className="text-sm text-gray-700 font-medium">用户组</span>
+                  {(['read','write','execute'] as const).map(key => (
+                    <label key={`g-${key}`} className="flex justify-center cursor-pointer">
+                      <input type="checkbox" checked={permGroup[key]} onChange={() => setPermGroup(p => ({ ...p, [key]: !p[key] }))}
+                        className="w-4 h-4 text-primary-500 border-surface-300 rounded focus:ring-primary-400" />
+                    </label>
+                  ))}
+                </div>
+                {/* Others 行 */}
+                <div className="grid grid-cols-[80px_repeat(3,1fr)] gap-2 items-center">
+                  <span className="text-sm text-gray-700 font-medium">其他用户</span>
+                  {(['read','write','execute'] as const).map(key => (
+                    <label key={`o-${key}`} className="flex justify-center cursor-pointer">
+                      <input type="checkbox" checked={permOthers[key]} onChange={() => setPermOthers(p => ({ ...p, [key]: !p[key] }))}
+                        className="w-4 h-4 text-primary-500 border-surface-300 rounded focus:ring-primary-400" />
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* 八进制显示 */}
+              <div className="flex items-center justify-center gap-2 bg-surface-50 rounded-lg py-2">
+                <span className="text-xs text-gray-500">八进制值</span>
+                <span className="text-lg font-mono font-bold text-primary-600">
+                  {getOctalFromPerms(permOwner, permGroup, permOthers)}
+                </span>
+              </div>
+
+              {/* 递归选项 - 仅目录 */}
+              {permDialog.type === 'directory' && (
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={permRecursive} onChange={() => setPermRecursive(p => !p)}
+                    className="w-4 h-4 text-primary-500 border-surface-300 rounded focus:ring-primary-400" />
+                  <span className="text-sm text-gray-600">递归设置子目录和文件</span>
+                </label>
+              )}
+            </div>
+            <div className="flex justify-end gap-3 px-6 py-4 border-t border-surface-200">
+              <button onClick={() => setPermDialog(null)} disabled={permSaving}
+                className="px-4 py-2 text-sm text-gray-600 hover:bg-surface-100 rounded-lg transition-colors disabled:opacity-50">取消</button>
+              <button onClick={handleSavePermission} disabled={permSaving}
+                className="px-4 py-2 bg-primary-500 hover:bg-primary-600 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50 flex items-center gap-1.5">
+                {permSaving && <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>}
+                {permSaving ? '保存中...' : '保存'}
               </button>
             </div>
           </motion.div>
