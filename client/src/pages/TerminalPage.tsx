@@ -31,8 +31,11 @@ export default function TerminalPage() {
     return () => { socketClient.disconnect() }
   }, [token])
 
-  const initTerminal = useCallback(() => {
-    if (!terminalRef.current || xtermRef.current) return
+  const termInitRef = useRef(false)
+
+  useEffect(() => {
+    if (!terminalRef.current || termInitRef.current) return
+    termInitRef.current = true
     const term = new Terminal({
       cursorBlink: true,
       cursorStyle: 'block',
@@ -47,13 +50,14 @@ export default function TerminalPage() {
     xtermRef.current = term
     fitAddonRef.current = fitAddon
 
+    const onResize = () => fitAddon.fit()
+    window.addEventListener('resize', onResize)
+
     term.onData((data) => {
       if (sessionIdRef.current) socketClient.sendTerminalInput(sessionIdRef.current, data)
     })
 
-    window.addEventListener('resize', () => fitAddon.fit())
-
-    // 实例 PTY 创建时自动附着（实例在后台启动后自动显示输出）
+    // 实例 PTY 创建时自动附着
     socketClient.on('pty-created', ({ sessionId, instanceId }) => {
       if (instanceId && instanceId === currentInstanceRef.current) {
         sessionIdRef.current = sessionId
@@ -79,9 +83,21 @@ export default function TerminalPage() {
         term.write(data)
       }
     })
-  }, [])
 
-  useEffect(() => { initTerminal() }, [initTerminal])
+    return () => {
+      window.removeEventListener('resize', onResize)
+      socketClient.off('pty-created')
+      socketClient.off('terminal-output')
+      socketClient.off('terminal-exit')
+      socketClient.off('terminal-error')
+      socketClient.off('terminal-history')
+      term.dispose()
+      xtermRef.current = null
+      fitAddonRef.current = null
+    }
+  }, [token])
+
+  // 选择实例时自动加载日志/实时输出
 
   // 选择实例时自动加载日志/实时输出
   useEffect(() => {

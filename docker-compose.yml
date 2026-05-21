@@ -10,7 +10,7 @@ services:
       - ./data:/app/server/data           # 面板数据（实例配置、用户信息等）
       - ./servers:/app/servers            # 服务器文件挂载入口
     command: >
-      sh -c "chmod -R 777 /app/server/data /app/servers && exec dumb-init node server/dist/index.js"
+      sh -c "chmod -R 777 /app/server/data && exec dumb-init node server/dist/index.js"
     restart: unless-stopped               # 非手动停止时自动重启
     environment:
       - TZ=Asia/Shanghai                  # 时区

@@ -3,7 +3,7 @@ import path from 'path'
 
 export interface ProgressData {
   operationId: string
-  type: 'compress' | 'extract' | 'copy'
+  type: 'compress' | 'extract' | 'copy' | 'delete'
   progress: number
   label: string
   subLabel?: string

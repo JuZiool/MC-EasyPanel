@@ -28,6 +28,7 @@ export class ChunkUploadManager {
   private readonly CHUNK_DIR: string
   private readonly CLEANUP_INTERVAL = 1000 * 60 * 60 // 1小时
   private readonly MAX_UPLOAD_AGE = 1000 * 60 * 60 * 24 // 24小时
+  private readonly MAX_CONCURRENT_UPLOADS = 50
 
   private constructor() {
     // 尝试多个路径（开发环境 / 打包后），遵循 AGENTS.md 第7条
@@ -99,6 +100,11 @@ export class ChunkUploadManager {
       const upload = this.uploads.get(uploadId)!
       upload.lastActivity = Date.now()
       return upload
+    }
+
+    // 限制并发上传数
+    if (this.uploads.size >= this.MAX_CONCURRENT_UPLOADS) {
+      throw new Error('并发上传数已达上限，请稍后重试')
     }
 
     // 创建新的上传会话
@@ -260,25 +266,23 @@ export class ChunkUploadManager {
   }
 
   /**
-   * 定时清理过期的上传会话
+   * 定时清理过期的上传会话（递归 setTimeout 防重叠）
    */
   private startCleanupTimer(): void {
-    setInterval(async () => {
+    const cleanup = () => {
       const now = Date.now()
       const expiredUploads: string[] = []
-
       for (const [uploadId, upload] of this.uploads.entries()) {
-        const age = now - upload.lastActivity
-        if (age > this.MAX_UPLOAD_AGE) {
+        if (now - upload.lastActivity > this.MAX_UPLOAD_AGE) {
           expiredUploads.push(uploadId)
         }
       }
-
-      for (const uploadId of expiredUploads) {
-        console.log(`清理过期上传会话: ${uploadId}`)
-        await this.cleanupUpload(uploadId)
+      if (expiredUploads.length > 0) {
+        Promise.all(expiredUploads.map(id => this.cleanupUpload(id).catch(() => {})))
       }
-    }, this.CLEANUP_INTERVAL)
+      setTimeout(cleanup, this.CLEANUP_INTERVAL)
+    }
+    setTimeout(cleanup, this.CLEANUP_INTERVAL)
   }
 
   /**

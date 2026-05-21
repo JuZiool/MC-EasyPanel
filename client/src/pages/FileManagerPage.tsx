@@ -3,13 +3,14 @@ import { useSearchParams } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useFileStore } from '../stores/fileStore'
 import { useNotificationStore } from '../stores/notificationStore'
-import { useProgressStore } from '../stores/progressStore'
+import { useProgressStore, onProgressComplete } from '../stores/progressStore'
 import { useAuthStore } from '../stores/authStore'
 import apiClient from '../utils/api'
 import socketClient from '../utils/socket'
-import MonacoEditor from '../components/MonacoEditor'
+import CodeEditor from '../components/CodeEditor'
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
 import ProgressPanel from '../components/ProgressPanel'
+import { isArchiveFile } from '../../../shared/archiveFormats.js'
 import { ArrowLeft, Upload, FilePlus, FolderPlus, RefreshCw, Download, Edit3, Trash2, FileText, Folder, Copy, Scissors, Edit, FileArchive, CheckSquare, Square, Link, Search, X, Shield } from 'lucide-react'
 
 interface ContextMenu {
@@ -32,8 +33,6 @@ export default function FileManagerPage() {
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null)
   const [renameTarget, setRenameTarget] = useState<{ path: string; name: string } | null>(null)
   const [renameValue, setRenameValue] = useState('')
-  const [copyMoveTarget, setCopyMoveTarget] = useState<{ path: string; name: string; action: 'copy' | 'move' } | null>(null)
-  const [copyMoveDest, setCopyMoveDest] = useState('')
   const [compressExtract, setCompressExtract] = useState<{ path: string; name: string; mode: 'compress' | 'extract'; destPath?: string } | null>(null)
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set())
   const [batchDelete, setBatchDelete] = useState(false)
@@ -57,6 +56,16 @@ export default function FileManagerPage() {
     if (token) socketClient.initialize(token)
   }, [])
 
+  // 文件操作完成后自动刷新列表
+  useEffect(() => {
+    const unsub = onProgressComplete((type) => {
+      if (['delete', 'compress', 'extract', 'copy', 'move', 'upload'].includes(type)) {
+        fetchFiles(currentPath)
+      }
+    })
+    return unsub
+  }, [currentPath, fetchFiles])
+
   useEffect(() => { setSelectedPaths(new Set()) }, [files])
 
   const toggleSelect = (filePath: string) => {
@@ -73,9 +82,19 @@ export default function FileManagerPage() {
   }
 
   const handleBatchDelete = async () => {
-    for (const p of selectedPaths) await apiClient.deleteFile(p)
-    addNotification({ type: 'success', title: `已删除 ${selectedPaths.size} 项` })
-    setSelectedPaths(new Set()); setBatchDelete(false); fetchFiles(currentPath)
+    const paths = Array.from(selectedPaths)
+    const opId = genOpId()
+    const socketId = socketClient.getSocketId() || undefined
+    addItem({ id: opId, type: 'delete', label: '批量删除...', progress: 0, status: 'active' })
+
+    const res = await apiClient.batchDeleteFiles(paths, opId, socketId)
+    if (res.success) {
+      addNotification({ type: 'info', title: '正在批量删除...', message: `${paths.length} 项` })
+    } else {
+      updateItem(opId, { status: 'error', label: '批量删除失败', error: res.message })
+      addNotification({ type: 'error', title: '批量删除失败', message: res.message })
+    }
+    setSelectedPaths(new Set()); setBatchDelete(false)
   }
 
   const handleBatchCompress = async () => {
@@ -127,7 +146,11 @@ export default function FileManagerPage() {
         else updateItem(opId, { status: 'error', label: `复制失败: ${name}`, error: res.message })
         setTimeout(() => removeItem(opId), 3000)
       } else {
-        await apiClient.moveFile(srcPath, destPath)
+        addItem({ id: opId, type: 'move', label: `移动: ${name}`, progress: 0, status: 'active' })
+        const res = await apiClient.moveFile(srcPath, destPath, opId, socketId)
+        if (res.success) updateItem(opId, { progress: 100, status: 'completed', label: `移动完成: ${name}` })
+        else updateItem(opId, { status: 'error', label: `移动失败: ${name}`, error: res.message })
+        setTimeout(() => removeItem(opId), 3000)
       }
     }
     addNotification({ type: 'success', title: `已${clipboard.action === 'copy' ? '复制' : '移动'} ${clipboard.paths.length} 项到当前目录` })
@@ -166,9 +189,17 @@ export default function FileManagerPage() {
 
   const handleDelete = async () => {
     if (!deleteTarget) return
-    const res = await apiClient.deleteFile(deleteTarget.path)
-    if (res.success) { addNotification({ type: 'success', title: '已删除' }); fetchFiles(currentPath) }
-    else addNotification({ type: 'error', title: '删除失败' })
+    const opId = genOpId()
+    const socketId = socketClient.getSocketId() || undefined
+    addItem({ id: opId, type: 'delete', label: `删除: ${deleteTarget.name}`, progress: 0, status: 'active' })
+
+    const res = await apiClient.deleteFile(deleteTarget.path, opId, socketId)
+    if (res.success) {
+      addNotification({ type: 'info', title: '正在删除...' })
+    } else {
+      updateItem(opId, { status: 'error', label: '删除失败', error: res.message })
+      addNotification({ type: 'error', title: '删除失败' })
+    }
     setDeleteTarget(null)
   }
 
@@ -208,30 +239,6 @@ export default function FileManagerPage() {
     setRenameTarget(null); setRenameValue('')
   }
 
-  const handleCopyMove = async () => {
-    if (!copyMoveTarget || !copyMoveDest.trim()) return
-    const destPath = copyMoveDest.trim().endsWith('/') ? copyMoveDest.trim() + copyMoveTarget.name : copyMoveDest.trim()
-    if (copyMoveTarget.action === 'copy') {
-      const opId = genOpId()
-      const socketId = socketClient.getSocketId() || undefined
-      addItem({ id: opId, type: 'copy', label: `复制: ${copyMoveTarget.name}`, progress: 0, status: 'active' })
-      const res = await apiClient.copyFile(copyMoveTarget.path, destPath, opId, socketId)
-      if (res.success) {
-        updateItem(opId, { progress: 100, status: 'completed', label: `复制完成: ${copyMoveTarget.name}` })
-        addNotification({ type: 'success', title: '已复制' })
-      } else {
-        updateItem(opId, { status: 'error', label: `复制失败: ${copyMoveTarget.name}`, error: res.message })
-        addNotification({ type: 'error', title: '复制失败' })
-      }
-      setTimeout(() => removeItem(opId), 3000)
-    } else {
-      const res = await apiClient.moveFile(copyMoveTarget.path, destPath)
-      if (res.success) addNotification({ type: 'success', title: '已移动' })
-      else addNotification({ type: 'error', title: '移动失败' })
-    }
-    fetchFiles(currentPath)
-    setCopyMoveTarget(null); setCopyMoveDest('')
-  }
 
   const handleCompress = async () => {
     if (!compressExtract) return
@@ -256,17 +263,15 @@ export default function FileManagerPage() {
     const opId = genOpId()
     const socketId = socketClient.getSocketId() || undefined
     addItem({ id: opId, type: 'extract', label: `解压: ${compressExtract.name}`, progress: 0, status: 'active' })
+    // 异步解压：后端立即返回，Socket.IO 推送进度和完成/失败事件
     const res = await apiClient.extractFile(compressExtract.path, opId, socketId, compressExtract.destPath || undefined)
     if (res.success) {
-      updateItem(opId, { progress: 100, status: 'completed', label: `解压完成: ${compressExtract.name}` })
-      addNotification({ type: 'success', title: '已解压' })
+      addNotification({ type: 'info', title: '解压已开始', message: '后台解压中，大文件可能需要几分钟，完成后会通知您' })
     } else {
       updateItem(opId, { status: 'error', label: '解压失败', error: res.message })
-      addNotification({ type: 'error', title: '解压失败' })
+      addNotification({ type: 'error', title: '解压失败', message: res.message })
     }
     setCompressExtract(null)
-    fetchFiles(currentPath)
-    setTimeout(() => removeItem(opId), 3000)
   }
 
   const doSearch = useCallback(async (query: string) => {
@@ -545,7 +550,7 @@ export default function FileManagerPage() {
         <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-white rounded-xl shadow-lg border border-surface-200 px-4 py-3 flex items-center gap-4">
           <span className="text-sm text-gray-600">已选 {selectedPaths.size} 项</span>
           <div className="w-px h-5 bg-surface-200" />
-          <button onClick={() => handleCopyToClipboard('copy')} className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-600 hover:bg-surface-100 rounded-lg transition-colors"><Copy className="w-4 h-4" />复制</button>
+          <button onClick={() => handleCopyToClipboard('copy')} className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-600 hover:bg-surface-100 rounded-lg transition-colors"><Copy className="w-4 h-4" />复制到剪贴板</button>
           <button onClick={() => handleCopyToClipboard('cut')} className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-600 hover:bg-surface-100 rounded-lg transition-colors"><Scissors className="w-4 h-4" />剪切</button>
           <button onClick={handleBatchCompress} className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-600 hover:bg-surface-100 rounded-lg transition-colors"><FileArchive className="w-4 h-4" />压缩</button>
           <button onClick={() => handleOpenPermission()} className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-600 hover:bg-surface-100 rounded-lg transition-colors"><Shield className="w-4 h-4" />权限</button>
@@ -583,7 +588,7 @@ export default function FileManagerPage() {
               </div>
             </div>
             <div className="flex-1 overflow-auto">
-              <MonacoEditor value={editFile.content} onChange={(v) => setEditFile({ ...editFile, content: v })} language="properties" height="60vh" />
+              <CodeEditor value={editFile.content} onChange={(v) => setEditFile({ ...editFile, content: v })} language="properties" height="60vh" />
             </div>
           </div>
         </motion.div>
@@ -653,13 +658,13 @@ export default function FileManagerPage() {
             className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-surface-50"><Link className="w-4 h-4" />复制容器内路径</button>
           <button onClick={() => { setRenameTarget({ path: contextMenu.file.path, name: contextMenu.file.name }); setRenameValue(contextMenu.file.name); setContextMenu(null) }}
             className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-surface-50"><Edit className="w-4 h-4" />重命名</button>
-          <button onClick={() => { setCopyMoveTarget({ path: contextMenu.file.path, name: contextMenu.file.name, action: 'copy' }); setCopyMoveDest(currentPath); setContextMenu(null) }}
-            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-surface-50"><Copy className="w-4 h-4" />复制</button>
-          <button onClick={() => { setCopyMoveTarget({ path: contextMenu.file.path, name: contextMenu.file.name, action: 'move' }); setCopyMoveDest(currentPath); setContextMenu(null) }}
-            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-surface-50"><Scissors className="w-4 h-4" />移动</button>
+          <button onClick={() => { setClipboard({ paths: [contextMenu.file.path], action: 'copy' }); setContextMenu(null); addNotification({ type: 'info', title: '已复制到剪贴板' }) }}
+            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-surface-50"><Copy className="w-4 h-4" />复制到剪贴板</button>
+          <button onClick={() => { setClipboard({ paths: [contextMenu.file.path], action: 'cut' }); setContextMenu(null); addNotification({ type: 'info', title: '已剪切到剪贴板' }) }}
+            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-surface-50"><Scissors className="w-4 h-4" />剪切到剪贴板</button>
           <button onClick={() => { setCompressExtract({ path: contextMenu.file.path, name: contextMenu.file.name, mode: 'compress' }); setContextMenu(null) }}
             className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-surface-50"><FileArchive className="w-4 h-4" />压缩</button>
-          {contextMenu.file.name.endsWith('.zip') && (
+          {isArchiveFile(contextMenu.file.name) && (
             <button onClick={() => { setCompressExtract({ path: contextMenu.file.path, name: contextMenu.file.name, mode: 'extract', destPath: currentPath }); setContextMenu(null) }}
               className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-surface-50"><FileArchive className="w-4 h-4" />解压</button>
           )}
@@ -680,21 +685,6 @@ export default function FileManagerPage() {
             <div className="flex justify-end gap-3 mt-4">
               <button onClick={() => { setRenameTarget(null); setRenameValue('') }} className="px-4 py-2 text-sm text-gray-600 hover:bg-surface-100 rounded-lg">取消</button>
               <button onClick={handleRename} className="px-4 py-2 bg-primary-500 hover:bg-primary-600 text-white rounded-lg text-sm font-medium">确认</button>
-            </div>
-          </motion.div>
-        </motion.div>
-      )}
-
-      {copyMoveTarget && (
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
-          <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} className="bg-white rounded-2xl shadow-xl border border-surface-200 p-6 max-w-md w-full">
-            <h3 className="text-lg font-semibold text-gray-800">{copyMoveTarget.action === 'copy' ? '复制' : '移动'}</h3>
-            <p className="text-sm text-gray-400 mt-1">{copyMoveTarget.name} →</p>
-            <input type="text" value={copyMoveDest} onChange={e => setCopyMoveDest(e.target.value)} autoFocus
-              className="w-full mt-4 px-3 py-2 rounded-lg border border-surface-200 bg-surface-50 focus:border-primary-400 outline-none text-gray-700 font-mono text-sm" />
-            <div className="flex justify-end gap-3 mt-4">
-              <button onClick={() => { setCopyMoveTarget(null); setCopyMoveDest('') }} className="px-4 py-2 text-sm text-gray-600 hover:bg-surface-100 rounded-lg">取消</button>
-              <button onClick={handleCopyMove} className="px-4 py-2 bg-primary-500 hover:bg-primary-600 text-white rounded-lg text-sm font-medium">确认</button>
             </div>
           </motion.div>
         </motion.div>

@@ -39,18 +39,23 @@ export class PlayerStatsRecorder {
   }
 
   start(): void {
-    // 先立即记录一次
     this.record()
-    this.timer = setInterval(() => this.record(), RECORD_INTERVAL)
+    this.scheduleNext()
     logger.info(`玩家数据记录器已启动，间隔 ${RECORD_INTERVAL / 1000}s`)
   }
 
   stop(): void {
     if (this.timer) {
-      clearInterval(this.timer)
+      clearTimeout(this.timer)
       this.timer = null
     }
     logger.info('玩家数据记录器已停止')
+  }
+
+  private scheduleNext(): void {
+    this.timer = setTimeout(() => {
+      this.record().finally(() => this.scheduleNext())
+    }, RECORD_INTERVAL)
   }
 
   private async record(): Promise<void> {

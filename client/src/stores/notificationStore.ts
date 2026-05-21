@@ -7,6 +7,8 @@ interface NotificationStore {
   removeNotification: (id: string) => void
 }
 
+const notificationTimeouts = new Map<string, ReturnType<typeof setTimeout>>()
+
 export const useNotificationStore = create<NotificationStore>((set, get) => ({
   notifications: [],
   addNotification: (n) => {
@@ -18,7 +20,20 @@ export const useNotificationStore = create<NotificationStore>((set, get) => ({
     const notification: Notification = { ...notificationWithDefaults, id, timestamp: Date.now() }
     set({ notifications: [...notifications, notification] })
     const duration = n.duration ?? 5000
-    if (duration > 0) setTimeout(() => get().removeNotification(id), duration)
+    if (duration > 0) {
+      const timer = setTimeout(() => {
+        get().removeNotification(id)
+        notificationTimeouts.delete(id)
+      }, duration)
+      notificationTimeouts.set(id, timer)
+    }
   },
-  removeNotification: (id) => set((s) => ({ notifications: s.notifications.filter(n => n.id !== id) }))
+  removeNotification: (id) => {
+    const timer = notificationTimeouts.get(id)
+    if (timer) {
+      clearTimeout(timer)
+      notificationTimeouts.delete(id)
+    }
+    set((s) => ({ notifications: s.notifications.filter(n => n.id !== id) }))
+  }
 }))

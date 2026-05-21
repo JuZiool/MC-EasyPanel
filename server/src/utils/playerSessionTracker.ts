@@ -59,16 +59,22 @@ export class PlayerSessionTracker {
 
   start(): void {
     this.poll()
-    this.timer = setInterval(() => this.poll(), POLL_INTERVAL)
+    this.scheduleNext()
     logger.info(`玩家会话追踪器已启动，间隔 ${POLL_INTERVAL / 1000}s`)
   }
 
   stop(): void {
     if (this.timer) {
-      clearInterval(this.timer)
+      clearTimeout(this.timer)
       this.timer = null
     }
     logger.info('玩家会话追踪器已停止')
+  }
+
+  private scheduleNext(): void {
+    this.timer = setTimeout(() => {
+      this.poll().finally(() => this.scheduleNext())
+    }, POLL_INTERVAL)
   }
 
   private async poll(): Promise<void> {

@@ -1,4 +1,4 @@
-FROM node:18-bullseye AS builder
+FROM node:20-bullseye AS builder
 
 WORKDIR /app
 
@@ -11,7 +11,7 @@ COPY . .
 RUN cd client && npm run build
 RUN cd server && npm run build
 
-FROM node:18-bullseye-slim AS runtime
+FROM node:20-bullseye-slim AS runtime
 
 WORKDIR /app
 

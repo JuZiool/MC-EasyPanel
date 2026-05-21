@@ -130,10 +130,20 @@ class InstanceManager extends EventEmitter {
     return inst
   }
 
-  deleteInstance(id: string): boolean {
+  deleteInstance(id: string, removeFiles?: boolean): boolean {
     const inst = this.instances.get(id)
     if (!inst) return false
     if (inst.status === 'running') this.stopInstance(id)
+    // 可选删除工作目录
+    if (removeFiles && inst.workingDirectory) {
+      try {
+        if (fs.existsSync(inst.workingDirectory)) {
+          fs.rmSync(inst.workingDirectory, { recursive: true, force: true })
+        }
+      } catch (e) {
+        console.error('删除实例工作目录失败:', e)
+      }
+    }
     this.instances.delete(id)
     this.saveInstances()
     this.emit('instance-deleted', { id, name: inst.name })

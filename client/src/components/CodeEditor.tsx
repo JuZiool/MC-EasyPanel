@@ -8,7 +8,7 @@ interface Props {
   height?: string
 }
 
-export default function MonacoEditor({ value, onChange, language, readOnly, height = '400px' }: Props) {
+export default function CodeEditor({ value, onChange, language, readOnly, height = '400px' }: Props) {
   const [code, setCode] = useState(value)
   const textRef = useRef<HTMLTextAreaElement>(null)
 

@@ -380,7 +380,7 @@ export class ChunkUploader {
       if (this.signal) {
         this.signal.addEventListener('abort', () => {
           xhr.abort()
-        })
+        }, { once: true })
       }
 
       xhr.open('POST', '/api/files/upload/chunk')

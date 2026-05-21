@@ -64,7 +64,7 @@ class ApiClient {
   async getInstance(id: string) { return this.get<Instance>(`/instances/${id}`) }
   async createInstance(data: Partial<Instance>) { return this.post<Instance>('/instances', data) }
   async updateInstance(id: string, data: Partial<Instance>) { return this.put<Instance>(`/instances/${id}`, data) }
-  async deleteInstance(id: string) { return this.delete(`/instances/${id}`) }
+  async deleteInstance(id: string, removeFiles?: boolean) { return this.delete(`/instances/${id}?removeFiles=${removeFiles ? '1' : '0'}`) }
   async startInstance(id: string) { return this.post<{ terminalSessionId?: string }>(`/instances/${id}/start`) }
   async stopInstance(id: string) { return this.post(`/instances/${id}/stop`) }
   async restartInstance(id: string) { return this.post(`/instances/${id}/restart`) }
@@ -80,13 +80,20 @@ class ApiClient {
   async searchFiles(path: string, query: string) { return this.get<{ name: string; path: string; type: 'file' | 'directory'; size: number; modified: string }[]>('/files/search', { params: { path, query } }) }
   async readFile(path: string) { return this.get<{ content: string; encoding?: string }>('/files/read', { params: { path } }) }
   async saveFile(path: string, content: string, encoding?: string) { return this.post('/files/save', { path, content, encoding }) }
-  async deleteFile(path: string) { return this.post('/files/delete', { path }) }
+  async deleteFile(path: string, operationId?: string, socketId?: string) {
+    return this.post('/files/delete', { path, operationId, socketId })
+  }
+  async batchDeleteFiles(paths: string[], operationId?: string, socketId?: string) {
+    return this.post('/files/batch-delete', { paths, operationId, socketId })
+  }
   async createDirectory(path: string) { return this.post('/files/mkdir', { path }) }
   async renameFile(path: string, newPath: string) { return this.post('/files/rename', { path, newPath }) }
   async copyFile(path: string, destPath: string, operationId?: string, socketId?: string) {
     return this.post('/files/copy', { path, destPath, operationId, socketId })
   }
-  async moveFile(path: string, destPath: string) { return this.post('/files/move', { path, destPath }) }
+  async moveFile(path: string, destPath: string, operationId?: string, socketId?: string) {
+    return this.post('/files/move', { path, destPath, operationId, socketId })
+  }
 
   async uploadFiles(path: string, files: FileList, onProgress?: (progress: number) => void) {
     const formData = new FormData()
@@ -116,7 +123,8 @@ class ApiClient {
       document.body.appendChild(a)
       a.click()
       document.body.removeChild(a)
-      URL.revokeObjectURL(url)
+      // 延迟释放 BLOB URL 确保浏览器已启动下载
+      setTimeout(() => URL.revokeObjectURL(url), 60000)
       return { success: true }
     } catch (e: any) {
       return { success: false, message: e.message || '下载失败' }

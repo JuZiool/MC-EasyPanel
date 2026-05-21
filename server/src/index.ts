@@ -77,6 +77,8 @@ instanceManager.on('instance-status-changed', (data) => {
   io.emit('instance-status', data)
 })
 
+const activeTerminals = new Map<string, any>()
+
 instanceManager.on('terminal-create', async ({ id, command, cwd, sessionId }) => {
   if (!command) return
   try {
@@ -138,7 +140,6 @@ io.use(async (socket, next) => {
   } catch { next(new Error('认证失败')) }
 })
 
-const activeTerminals = new Map<string, any>()
 
 io.on('connection', (socket) => {
   logger.info(`Socket 已连接: ${socket.id}`)

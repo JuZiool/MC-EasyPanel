@@ -2,15 +2,16 @@ import { Router } from 'express'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
-import { exec } from 'child_process'
-import { promisify } from 'util'
+import { spawn } from 'child_process'
+import { Worker } from 'worker_threads'
+import { fileURLToPath } from 'url'
 import multer from 'multer'
-import AdmZip from 'adm-zip'
 import { authenticateToken, authenticateTokenFlexible, AuthenticatedRequest } from '../middleware/auth.js'
-import { collectFiles, emitProgress } from '../utils/progressTracker.js'
+import { emitProgress } from '../utils/progressTracker.js'
 import { ChunkUploadManager } from '../modules/chunkUploadManager.js'
 
-const execAsync = promisify(exec)
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const WORKER_PATH = path.join(__dirname, '..', 'workers', 'fileWorker.js')
 
 const router = Router()
 router.use(authenticateToken)
@@ -20,12 +21,54 @@ const upload = multer({
   limits: { fileSize: 5 * 1024 * 1024 * 1024 } // 单文件限制 5GB
 })
 
-function isValidPath(p: string): boolean {
-  return path.isAbsolute(p) && !p.includes('..')
+/** 系统关键路径黑名单 */
+const SYSTEM_PATHS = ['/etc', '/bin', '/sbin', '/lib', '/lib64', '/usr', '/proc', '/dev', '/sys', '/boot', '/root', '/var', '/opt']
+
+/** 允许操作的根路径 */
+const ALLOWED_ROOTS = [
+  '/app',
+  '/server',
+  process.cwd(),
+]
+
+function isWithinAllowedRoots(resolved: string): boolean {
+  for (const root of ALLOWED_ROOTS) {
+    const r = path.resolve(root)
+    if (resolved === r || resolved.startsWith(r + '/')) return true
+  }
+  return false
 }
 
-function sleep(ms: number) {
-  return new Promise(resolve => setTimeout(resolve, ms))
+function isNotSystemPath(resolved: string): boolean {
+  for (const sp of SYSTEM_PATHS) {
+    if (resolved === sp || resolved.startsWith(sp + '/')) return false
+  }
+  return true
+}
+
+function isValidPath(p: string): boolean {
+  try {
+    const real = fs.realpathSync.native(p)
+    if (!path.isAbsolute(p) || p.includes('..')) return false
+    if (path.relative(p, real).startsWith('..')) return false
+    return isWithinAllowedRoots(real) && isNotSystemPath(real)
+  } catch {
+    if (!path.isAbsolute(p) || p.includes('..')) return false
+    const resolved = path.resolve(p)
+    if (!isNotSystemPath(resolved)) return false
+    const parentDir = path.dirname(p)
+    try {
+      const realParent = fs.realpathSync.native(parentDir)
+      if (path.relative(parentDir, realParent).startsWith('..')) return false
+      return isWithinAllowedRoots(realParent)
+    } catch {
+      return isWithinAllowedRoots(resolved)
+    }
+  }
+}
+
+function isPathOperable(p: string): boolean {
+  return isValidPath(p)
 }
 
 router.get('/list', (req: AuthenticatedRequest, res) => {
@@ -109,15 +152,32 @@ router.post('/save', (req: AuthenticatedRequest, res) => {
   catch (e: any) { res.status(500).json({ success: false, message: e.message }) }
 })
 
-router.post('/delete', (req: AuthenticatedRequest, res) => {
-  const { path: targetPath } = req.body
+router.post('/delete', async (req: AuthenticatedRequest, res) => {
+  const { path: targetPath, operationId, socketId } = req.body
   if (!targetPath || !isValidPath(targetPath)) return res.status(400).json({ success: false, message: '无效路径' })
-  try {
-    const stat = fs.statSync(targetPath)
-    if (stat.isDirectory()) fs.rmSync(targetPath, { recursive: true })
-    else fs.unlinkSync(targetPath)
-    res.json({ success: true, message: '已删除' })
-  } catch (e: any) { res.status(500).json({ success: false, message: e.message }) }
+  const io = req.app.get('io')
+  
+  // 后台异步删除
+  res.json({ success: true, message: '正在删除...' })
+  
+  runDeleteInBackground(targetPath, io, socketId, operationId).catch((err: any) => {
+    console.error('后台删除异常:', err)
+  })
+})
+
+router.post('/batch-delete', async (req: AuthenticatedRequest, res) => {
+  const { paths, operationId, socketId } = req.body
+  if (!paths || !Array.isArray(paths) || paths.length === 0) {
+    return res.status(400).json({ success: false, message: '无效路径列表' })
+  }
+  for (const p of paths) { if (!isValidPath(p)) return res.status(400).json({ success: false, message: '包含无效路径' }) }
+  const io = req.app.get('io')
+
+  res.json({ success: true, message: '正在批量删除...' })
+
+  runBatchDeleteInBackground(paths, io, socketId, operationId).catch((err: any) => {
+    console.error('后台批量删除异常:', err)
+  })
 })
 
 router.post('/mkdir', (req: AuthenticatedRequest, res) => {
@@ -140,8 +200,8 @@ router.post('/upload', upload.array('files'), (req: AuthenticatedRequest, res) =
   try {
     const files = req.files as Express.Multer.File[]
     files.forEach(f => {
-      const originalname = Buffer.from(f.originalname, 'latin1').toString('utf8')
-      const targetPath = path.join(targetDir, originalname)
+      const safeName = path.basename(Buffer.from(f.originalname, 'latin1').toString('utf8'))
+      const targetPath = path.join(targetDir, safeName)
       fs.copyFileSync(f.path, targetPath)
       fs.unlinkSync(f.path)
     })
@@ -162,65 +222,26 @@ router.post('/copy', async (req: AuthenticatedRequest, res) => {
   const { path: srcPath, destPath, operationId, socketId } = req.body
   if (!srcPath || !destPath || !isValidPath(srcPath) || !isValidPath(destPath)) return res.status(400).json({ success: false, message: '无效路径' })
   const io = req.app.get('io')
-  try {
-    const stat = fs.statSync(srcPath)
-    const baseName = path.basename(srcPath)
-    if (stat.isDirectory()) {
-      const total = collectFiles(srcPath).length
-      if (total === 0) {
-        fs.mkdirSync(destPath, { recursive: true })
-      } else {
-        let processed = 0
-        const entries = collectFiles(srcPath)
-        for (const entry of entries) {
-          const targetFile = path.join(destPath, path.relative(srcPath, entry.fullPath))
-          const targetDir = path.dirname(targetFile)
-          if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true })
-          fs.copyFileSync(entry.fullPath, targetFile)
-          processed++
-          if (socketId) {
-            emitProgress(io, socketId, {
-              operationId,
-              type: 'copy',
-              progress: Math.round((processed / total) * 100),
-              label: `复制: ${baseName}`,
-              subLabel: `${processed}/${total} 个文件`,
-              status: 'active'
-            })
-          }
-          await sleep(0)
-        }
-      }
-    } else {
-      const targetDir = path.dirname(destPath)
-      if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true })
-      fs.copyFileSync(srcPath, destPath)
-    }
-    if (socketId) {
-      emitProgress(io, socketId, {
-        operationId,
-        type: 'copy',
-        progress: 100,
-        label: `复制: ${baseName}`,
-        status: 'completed'
-      })
-    }
-    res.json({ success: true, message: '已复制' })
-  } catch (e: any) {
-    if (socketId) {
-      emitProgress(io, socketId, {
-        operationId, type: 'copy', progress: 0, label: '复制失败', status: 'error', error: e.message
-      })
-    }
-    res.status(500).json({ success: false, message: e.message })
-  }
+  
+  // 后台异步复制
+  res.json({ success: true, message: '正在复制...' })
+  
+  runCopyInBackground(srcPath, destPath, io, socketId, operationId).catch((err: any) => {
+    console.error('后台复制异常:', err)
+  })
 })
 
-router.post('/move', (req: AuthenticatedRequest, res) => {
-  const { path: srcPath, destPath } = req.body
+router.post('/move', async (req: AuthenticatedRequest, res) => {
+  const { path: srcPath, destPath, operationId, socketId } = req.body
   if (!srcPath || !destPath || !isValidPath(srcPath) || !isValidPath(destPath)) return res.status(400).json({ success: false, message: '无效路径' })
-  try { fs.renameSync(srcPath, destPath); res.json({ success: true, message: '已移动' }) }
-  catch (e: any) { res.status(500).json({ success: false, message: e.message }) }
+  const io = req.app.get('io')
+
+  // 后台异步移动（Worker 线程，支持跨文件系统）
+  res.json({ success: true, message: '正在移动...' })
+
+  runMoveInBackground(srcPath, destPath, io, socketId, operationId).catch((err: any) => {
+    console.error('后台移动异常:', err)
+  })
 })
 
 router.post('/compress-batch', async (req: AuthenticatedRequest, res) => {
@@ -228,164 +249,234 @@ router.post('/compress-batch', async (req: AuthenticatedRequest, res) => {
   if (!paths || !Array.isArray(paths) || paths.length === 0) return res.status(400).json({ success: false, message: '无效路径列表' })
   for (const p of paths) { if (!isValidPath(p)) return res.status(400).json({ success: false, message: '包含无效路径' }) }
   const io = req.app.get('io')
-  try {
-    const parentDir = path.dirname(paths[0])
-    const zipName = name || `batch-${Date.now()}.zip`
-    const zipPath = path.join(parentDir, zipName)
-    const zip = new AdmZip()
+  
+  // 后台异步压缩
+  res.json({ success: true, message: '正在压缩...' })
+  
+  runCompressBatchInBackground(paths, name || `batch-${Date.now()}.zip`, io, socketId, operationId).catch((err: any) => {
+    console.error('后台批量压缩异常:', err)
+  })
+})
 
-    let items: { fullPath: string; zipPrefix: string }[] = []
-    for (const p of paths) {
-      const stat = fs.statSync(p)
-      const baseName = path.basename(p)
-      if (stat.isDirectory()) {
-        const files = collectFiles(p)
-        for (const f of files) {
-          items.push({ fullPath: f.fullPath, zipPrefix: path.join(baseName, f.zipPath) })
-        }
-      } else {
-        items.push({ fullPath: p, zipPrefix: '' })
+// ======================== 后台异步操作函数（Worker 线程执行） ========================
+
+/**
+ * 创建 Worker 并桥接消息到 Socket.IO 进度事件
+ */
+function createWorkerBridge(
+  taskData: any,
+  io: any,
+  socketId: string | undefined,
+  operationId: string,
+  opType: string,
+  labels: {
+    progress?: (progress: number, subLabel?: string) => string
+    complete?: (subLabel?: string) => string
+    error: string
+  }
+): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const worker = new Worker(WORKER_PATH, { workerData: taskData })
+
+    worker.on('message', (msg: any) => {
+      switch (msg.type) {
+        case 'progress':
+          if (socketId) {
+            emitProgress(io, socketId, {
+              operationId, type: opType as any, status: 'active',
+              progress: msg.progress,
+              label: labels.progress?.(msg.progress, msg.subLabel) || `处理中 ${msg.progress}%`,
+              subLabel: msg.subLabel,
+            })
+          }
+          break
+        case 'complete':
+          if (socketId) {
+            emitProgress(io, socketId, {
+              operationId, type: opType as any, status: 'completed', progress: 100,
+              label: labels.complete?.(msg.subLabel) || '完成',
+              subLabel: msg.subLabel,
+            })
+          }
+          resolve()
+          break
+        case 'error':
+          if (socketId) {
+            emitProgress(io, socketId, {
+              operationId, type: opType as any, status: 'error', progress: 0,
+              label: labels.error, error: msg.error,
+            })
+          }
+          reject(new Error(msg.error))
+          break
       }
-    }
-
-    const total = items.length
-    let processed = 0
-
-    for (const item of items) {
-      zip.addLocalFile(item.fullPath, item.zipPrefix)
-      processed++
+    })
+    worker.on('error', (err) => {
+      console.error('Worker 异常:', err)
       if (socketId) {
         emitProgress(io, socketId, {
-          operationId,
-          type: 'compress',
-          progress: Math.round((processed / total) * 100),
-          label: `批量压缩: ${zipName}`,
-          subLabel: `${processed}/${total} 个文件`,
-          status: 'active'
+          operationId, type: opType as any, status: 'error', progress: 0,
+          label: labels.error, error: err.message,
         })
       }
-      await sleep(0)
-    }
+      reject(err)
+    })
+    worker.on('exit', (code) => {
+      if (code !== 0) {
+        const errMsg = `Worker 异常退出码: ${code}`
+        if (socketId) {
+          emitProgress(io, socketId, {
+            operationId, type: opType as any, status: 'error', progress: 0,
+            label: labels.error, error: errMsg,
+          })
+        }
+        reject(new Error(errMsg))
+      }
+    })
+  })
+}
 
-    zip.writeZip(zipPath)
-    if (socketId) {
-      emitProgress(io, socketId, {
-        operationId, type: 'compress', progress: 100, label: `批量压缩: ${zipName}`, status: 'completed'
-      })
+/**
+ * 后台异步删除
+ */
+async function runDeleteInBackground(
+  targetPath: string, io: any, socketId: string | undefined, operationId: string
+): Promise<void> {
+  const baseName = path.basename(targetPath)
+  return createWorkerBridge(
+    { type: 'delete', targetPath }, io, socketId, operationId, 'delete',
+    {
+      progress: () => `删除: ${baseName}`,
+      complete: () => `已删除: ${baseName}`,
+      error: '删除失败',
     }
-    res.json({ success: true, message: '已批量压缩', data: { path: zipPath, name: zipName } })
-  } catch (e: any) {
-    if (socketId) {
-      emitProgress(io, socketId, {
-        operationId, type: 'compress', progress: 0, label: '批量压缩失败', status: 'error', error: e.message
-      })
+  )
+}
+
+/**
+ * 后台异步批量删除
+ */
+async function runBatchDeleteInBackground(
+  paths: string[], io: any, socketId: string | undefined, operationId: string
+): Promise<void> {
+  return createWorkerBridge(
+    { type: 'batch-delete', paths }, io, socketId, operationId, 'delete',
+    {
+      progress: (p) => `批量删除 ${p}%`,
+      complete: (sub) => sub?.includes('失败') ? '批量删除完成（部分失败）' : '批量删除完成',
+      error: '批量删除失败',
     }
-    res.status(500).json({ success: false, message: e.message })
-  }
-})
+  )
+}
+
+/**
+ * 后台异步复制
+ */
+async function runCopyInBackground(
+  srcPath: string, destPath: string, io: any, socketId: string | undefined, operationId: string
+): Promise<void> {
+  const baseName = path.basename(srcPath)
+  return createWorkerBridge(
+    { type: 'copy', srcPath, destPath }, io, socketId, operationId, 'copy',
+    {
+      progress: () => `复制: ${baseName}`,
+      complete: () => `已复制: ${baseName}`,
+      error: '复制失败',
+    }
+  )
+}
+
+/**
+ * 后台异步移动（Worker 线程）
+ */
+async function runMoveInBackground(
+  srcPath: string, destPath: string, io: any, socketId: string | undefined, operationId: string
+): Promise<void> {
+  const baseName = path.basename(srcPath)
+  return createWorkerBridge(
+    { type: 'move', srcPath, destPath }, io, socketId, operationId, 'move',
+    {
+      progress: () => `移动: ${baseName}`,
+      complete: () => `已移动: ${baseName}`,
+      error: '移动失败',
+    }
+  )
+}
+
+/**
+ * 后台异步压缩（单个文件/目录）
+ */
+async function runCompressInBackground(
+  targetPath: string, io: any, socketId: string | undefined, operationId: string
+): Promise<void> {
+  return createWorkerBridge(
+    { type: 'compress', targetPath }, io, socketId, operationId, 'compress',
+    {
+      progress: () => `压缩: ${path.basename(targetPath)}`,
+      complete: () => `已压缩: ${path.basename(targetPath)}.zip`,
+      error: '压缩失败',
+    }
+  )
+}
+
+/**
+ * 后台异步批量压缩
+ */
+async function runCompressBatchInBackground(
+  paths: string[], zipName: string, io: any, socketId: string | undefined, operationId: string
+): Promise<void> {
+  return createWorkerBridge(
+    { type: 'compress-batch', paths, zipName }, io, socketId, operationId, 'compress',
+    {
+      progress: () => `批量压缩: ${zipName}`,
+      complete: () => `批量压缩: ${zipName}`,
+      error: '批量压缩失败',
+    }
+  )
+}
 
 router.post('/compress', async (req: AuthenticatedRequest, res) => {
   const { path: targetPath, operationId, socketId } = req.body
   if (!targetPath || !isValidPath(targetPath)) return res.status(400).json({ success: false, message: '无效路径' })
   const io = req.app.get('io')
-  try {
-    const stat = fs.statSync(targetPath)
-    const parentDir = path.dirname(targetPath)
-    const baseName = path.basename(targetPath)
-    const zipName = baseName + '.zip'
-    const zipPath = path.join(parentDir, zipName)
-    const zip = new AdmZip()
-
-    if (stat.isDirectory()) {
-      const files = collectFiles(targetPath)
-      const total = files.length
-      let processed = 0
-
-      for (const f of files) {
-        zip.addLocalFile(f.fullPath, f.zipPath)
-        processed++
-        if (socketId) {
-          emitProgress(io, socketId, {
-            operationId,
-            type: 'compress',
-            progress: Math.round((processed / total) * 100),
-            label: `压缩: ${baseName}`,
-            subLabel: `${processed}/${total} 个文件`,
-            status: 'active'
-          })
-        }
-        await sleep(0)
-      }
-    } else {
-      zip.addLocalFile(targetPath)
-    }
-
-    zip.writeZip(zipPath)
-    if (socketId) {
-      emitProgress(io, socketId, {
-        operationId, type: 'compress', progress: 100, label: `压缩: ${baseName}`, status: 'completed'
-      })
-    }
-    res.json({ success: true, message: '已压缩', data: { path: zipPath, name: zipName } })
-  } catch (e: any) {
-    if (socketId) {
-      emitProgress(io, socketId, {
-        operationId, type: 'compress', progress: 0, label: '压缩失败', status: 'error', error: e.message
-      })
-    }
-    res.status(500).json({ success: false, message: e.message })
-  }
+  
+  // 后台异步压缩
+  res.json({ success: true, message: '正在压缩...' })
+  
+  runCompressInBackground(targetPath, io, socketId, operationId).catch((err: any) => {
+    console.error('后台压缩异常:', err)
+  })
 })
+
+/**
+ * 后台异步解压（Worker 线程执行）
+ */
+async function extractInBackground(zipPath: string, targetDir: string, io: any, socketId: string | undefined, operationId: string): Promise<void> {
+  return createWorkerBridge(
+    { type: 'extract', zipPath, targetDir }, io, socketId, operationId, 'extract',
+    {
+      progress: () => '正在解压...',
+      complete: () => '解压完成: ' + path.basename(zipPath),
+      error: '解压失败',
+    }
+  )
+}
 
 router.post('/extract', async (req: AuthenticatedRequest, res) => {
   const { path: zipPath, destPath, operationId, socketId } = req.body
   if (!zipPath || !isValidPath(zipPath)) return res.status(400).json({ success: false, message: '无效路径' })
+  if (!fs.existsSync(zipPath)) return res.status(400).json({ success: false, message: '压缩包不存在' })
   const io = req.app.get('io')
-  try {
-    const targetDir = destPath || path.dirname(zipPath)
-    if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true })
-    const zip = new AdmZip(zipPath)
-    const entries = zip.getEntries()
-    const total = entries.length
-    let processed = 0
+  const targetDir = destPath || path.dirname(zipPath)
+  if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true })
 
-    for (const entry of entries) {
-      // AdmZip 已自动处理 UTF-8 文件名编码，直接使用 entryName
-      const targetPath = path.join(targetDir, entry.entryName)
-      const targetParent = path.dirname(targetPath)
-      if (!fs.existsSync(targetParent)) fs.mkdirSync(targetParent, { recursive: true })
-      if (!entry.isDirectory) {
-        const data = entry.getData()
-        fs.writeFileSync(targetPath, data)
-      }
-      processed++
-      if (socketId) {
-        emitProgress(io, socketId, {
-          operationId,
-          type: 'extract',
-          progress: Math.round((processed / total) * 100),
-          label: `解压: ${path.basename(zipPath)}`,
-          subLabel: `${processed}/${total} 个文件`,
-          status: 'active'
-        })
-      }
-      await sleep(0)
-    }
+  // 立即返回响应，后台异步解压
+  res.json({ success: true, message: '解压已开始', data: { path: targetDir } })
 
-    if (socketId) {
-      emitProgress(io, socketId, {
-        operationId, type: 'extract', progress: 100, label: `解压: ${path.basename(zipPath)}`, status: 'completed'
-      })
-    }
-    res.json({ success: true, message: '已解压', data: { path: targetDir } })
-  } catch (e: any) {
-    if (socketId) {
-      emitProgress(io, socketId, {
-        operationId, type: 'extract', progress: 0, label: '解压失败', status: 'error', error: e.message
-      })
-    }
-    res.status(500).json({ success: false, message: e.message })
-  }
+  // 后台解压（不阻塞响应）
+  extractInBackground(zipPath, targetDir, io, socketId, operationId).catch((err: any) => {
+    console.error('后台解压异常:', err)
+  })
 })
 
 // ============================================================
@@ -498,15 +589,13 @@ router.post('/upload/merge', authenticateToken, async (req: AuthenticatedRequest
       })
     }
 
-    // 处理路径
-    let fullTargetPath: string
-    if (path.isAbsolute(targetPath)) {
-      fullTargetPath = targetPath
-    } else {
-      fullTargetPath = path.resolve(process.cwd(), targetPath.replace(/^\//, ''))
+    // 安全校验：禁止路径遍历
+    if (!isValidPath(targetPath)) {
+      return res.status(400).json({ success: false, message: '无效的目标路径' })
     }
-
-    const targetFilePath = path.join(fullTargetPath, fileName)
+    const safeFileName = path.basename(fileName)
+    const fullTargetPath = path.resolve(targetPath)
+    const targetFilePath = path.join(fullTargetPath, safeFileName)
 
     // 检查文件是否已存在
     let finalFilePath = targetFilePath
@@ -586,8 +675,18 @@ router.get('/permissions', authenticateToken, async (req: AuthenticatedRequest, 
       return res.status(404).json({ success: false, message: '文件或目录不存在' })
     }
     const stats = fs.statSync(filePath)
-    const { stdout } = await execAsync(`stat -c "%a %U %G" "${filePath}"`)
-    const [octalPermissions, owner, group] = stdout.trim().split(' ')
+    const statResult = await new Promise<string>((resolve, reject) => {
+      const child = spawn('stat', ['-c', '%a %U %G', '--', filePath])
+      let out = '', err = ''
+      child.stdout.on('data', (d: Buffer) => { out += d.toString() })
+      child.stderr.on('data', (d: Buffer) => { err += d.toString() })
+      child.on('close', (code) => {
+        if (code === 0) resolve(out.trim())
+        else reject(new Error(err.trim() || `stat 退出码: ${code}`))
+      })
+      child.on('error', (e) => reject(e))
+    })
+    const [octalPermissions, owner, group] = statResult.split(' ')
 
     const parseOctalPermissions = (octal: string) => {
       const ownerPerms = parseInt(octal[0])
@@ -654,10 +753,21 @@ router.post('/permissions', authenticateToken, async (req: AuthenticatedRequest,
       return res.status(400).json({ success: false, message: '权限格式无效，请使用 "777" 或 {owner:{read,write,execute},...}' })
     }
 
-    const chmodCommand = recursive
-      ? `chmod -R ${octalPermissions} "${filePath}"`
-      : `chmod ${octalPermissions} "${filePath}"`
-    await execAsync(chmodCommand)
+    const mode = parseInt(octalPermissions, 8)
+    if (recursive) {
+      await new Promise<void>((resolve, reject) => {
+        const child = spawn('chmod', ['-R', mode.toString(8), '--', filePath])
+        let err = ''
+        child.stderr.on('data', (d: Buffer) => { err += d.toString() })
+        child.on('close', (code) => {
+          if (code === 0) resolve()
+          else reject(new Error(err.trim() || `chmod 退出码: ${code}`))
+        })
+        child.on('error', (e) => reject(e))
+      })
+    } else {
+      fs.chmodSync(filePath, mode)
+    }
 
     res.json({ success: true, message: '权限修改成功', data: { octal: octalPermissions } })
   } catch (error: any) {

@@ -29,8 +29,7 @@ export function authenticateToken(req: AuthenticatedRequest, res: Response, next
 
 export function authenticateTokenFlexible(req: AuthenticatedRequest, res: Response, next: NextFunction): void {
   const authHeader = req.headers['authorization']
-  let token = authHeader && authHeader.split(' ')[1]
-  if (!token) token = req.query.token as string
+  const token = authHeader && authHeader.split(' ')[1]
   if (!token) {
     res.status(401).json({ success: false, message: '需要提供访问令牌' })
     return
