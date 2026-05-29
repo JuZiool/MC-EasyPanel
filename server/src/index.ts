@@ -3,6 +3,7 @@ import { createServer } from 'http'
 import { Server } from 'socket.io'
 import cors from 'cors'
 import helmet from 'helmet'
+import jwt from 'jsonwebtoken'
 import dotenv from 'dotenv'
 import path from 'path'
 import fs from 'fs'
@@ -18,19 +19,45 @@ import { PlayerSessionTracker } from './utils/playerSessionTracker.js'
 import { queryInstancePlayers, queryMultipleInstancePlayers } from './utils/mcQuery.js'
 
 dotenv.config()
+
+// 生产环境拒绝默认 JWT 密钥
+const JWT_SECRET = process.env.JWT_SECRET
+if (!JWT_SECRET || JWT_SECRET === 'mc-easypanel-default-secret-change-me' || JWT_SECRET === 'mc-easypanel-secret-key-change-in-production') {
+  logger.error('必须设置 JWT_SECRET 环境变量，且不能使用默认值')
+  process.exit(1)
+}
+
 const PORT = parseInt(process.env.SERVER_PORT || '3001', 10)
+const isDev = process.env.DEV_MODE === 'true' || process.env.NODE_ENV !== 'production'
+const corsOrigin = isDev ? '*' : false
 
 const app = express()
 const httpServer = createServer(app)
 const io = new Server(httpServer, {
-  cors: { origin: '*', methods: ['GET', 'POST'] },
+  cors: { origin: corsOrigin, methods: ['GET', 'POST'] },
   transports: ['websocket', 'polling']
 })
 
 app.set('io', io)
 
-app.use(helmet({ contentSecurityPolicy: false, crossOriginOpenerPolicy: false }))
-app.use(cors())
+app.use(helmet({
+  contentSecurityPolicy: isDev ? false : {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", 'data:', 'blob:'],
+      connectSrc: ["'self'", 'ws:', 'wss:'],
+      fontSrc: ["'self'", 'data:'],
+    }
+  },
+  crossOriginOpenerPolicy: isDev ? false : { policy: 'same-origin' }
+}))
+if (isDev) {
+  app.use(cors())
+} else {
+  app.use(cors({ origin: false }))
+}
 app.use(express.json({ limit: '10mb' }))
 app.use(express.urlencoded({ extended: true }))
 
@@ -95,6 +122,7 @@ instanceManager.on('terminal-create', async ({ id, command, cwd, sessionId }) =>
     })
     ptyProcess.onExit(() => {
       io.emit('terminal-exit', { sessionId })
+      logBuffer.clear(sessionId)
       instanceManager.setInstanceStopped(id)
       activeTerminals.delete(sessionId)
     })
@@ -128,18 +156,16 @@ app.use('/api/instances', setupInstanceRoutes(instanceManager, playerStatsRecord
 app.use('/api/system', systemRoutes)
 app.use('/api/files', filesRouter)
 
-// Socket.IO 认证
-io.use(async (socket, next) => {
+// Socket.IO 认证（复用顶部已解析的 jwt 和 JWT_SECRET）
+io.use((socket, next) => {
   try {
     const { token } = socket.handshake.auth
     if (!token) return next(new Error('未提供认证令牌'))
-    const jwt = await import('jsonwebtoken')
-    const decoded = jwt.default.verify(token, process.env.JWT_SECRET || 'mc-easypanel-default-secret-change-me') as any
+    const decoded = jwt.verify(token, JWT_SECRET) as { userId: string; username: string; role: string }
     socket.data.user = { userId: decoded.userId, username: decoded.username, role: decoded.role }
     next()
   } catch { next(new Error('认证失败')) }
 })
-
 
 io.on('connection', (socket) => {
   logger.info(`Socket 已连接: ${socket.id}`)
@@ -162,6 +188,7 @@ io.on('connection', (socket) => {
 
       ptyProcess.onExit(() => {
         socket.emit('terminal-exit', { sessionId })
+        logBuffer.clear(sessionId)
         for (const inst of instanceManager.getInstances()) {
           if (inst.terminalSessionId === sessionId && inst.status === 'running') {
             instanceManager.setInstanceStopped(inst.id)
@@ -189,9 +216,6 @@ io.on('connection', (socket) => {
   socket.on('close-pty', ({ sessionId }) => {
     const pty = activeTerminals.get(sessionId)
     if (pty) {
-      // 仅断开终端连接，不杀死进程
-      // 不从 activeTerminals 删除 —— 重连后仍需通过 sessionId 发送输入
-      // 进程自然退出时 onExit 会清理 activeTerminals
       logger.info(`终端会话已断开: ${sessionId}`)
     }
   })

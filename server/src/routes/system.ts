@@ -1,7 +1,9 @@
 import { Router, Request, Response } from 'express'
 import os from 'os'
-
+import { authenticateToken } from '../middleware/auth.js'
 const router = Router()
+router.use(authenticateToken)
+
 
 router.get('/stats', (_req: Request, res: Response) => {
   const cpus = os.cpus()

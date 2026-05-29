@@ -16,4 +16,5 @@ services:
       - TZ=Asia/Shanghai                  # 时区
       - NODE_ENV=production               # 运行模式
       - PORT=3001                         # 面板监听端口
-      - JWT_SECRET=${JWT_SECRET:-mc-easypanel-secret-key-change-in-production}  # JWT 密钥（可通过 .env 覆盖）
+      - JWT_SECRET=${JWT_SECRET}  # JWT 签名密钥（必填！通过 .env 文件设置，不可使用默认值）
+

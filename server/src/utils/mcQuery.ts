@@ -229,20 +229,24 @@ export async function queryMultipleInstancePlayers(
 ): Promise<Record<string, McServerStatus>> {
   const results: Record<string, McServerStatus> = {}
 
-  const queries = instances.map(async (inst) => {
-    try {
-      const status = await queryInstancePlayers(inst.workingDirectory)
-      results[inst.id] = status
-    } catch (e: any) {
-      results[inst.id] = { online: false, error: e.message }
-    }
-  })
-
-  // 并行查询所有服务器（但限制并发数，避免资源耗尽）
+  // 真正限制并发数：一次最多同时查询 5 个服务器
   const CONCURRENCY = 5
-  for (let i = 0; i < queries.length; i += CONCURRENCY) {
-    await Promise.all(queries.slice(i, i + CONCURRENCY))
+  const iterator = instances.entries()
+
+  async function worker() {
+    for (const [id, inst] of iterator) {
+      try {
+        const status = await queryInstancePlayers(inst.workingDirectory)
+        results[inst.id] = status
+      } catch (e: any) {
+        results[inst.id] = { online: false, error: e.message }
+      }
+    }
   }
+
+  const workers = Array.from({ length: Math.min(CONCURRENCY, instances.length) }, () => worker())
+  await Promise.all(workers)
 
   return results
 }
+

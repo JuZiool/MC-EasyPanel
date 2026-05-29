@@ -6,7 +6,8 @@ import { spawn } from 'child_process'
 import { Worker } from 'worker_threads'
 import { fileURLToPath } from 'url'
 import multer from 'multer'
-import { authenticateToken, authenticateTokenFlexible, AuthenticatedRequest } from '../middleware/auth.js'
+import { authenticateToken, AuthenticatedRequest } from '../middleware/auth.js'
+
 import { emitProgress } from '../utils/progressTracker.js'
 import { ChunkUploadManager } from '../modules/chunkUploadManager.js'
 
@@ -209,7 +210,8 @@ router.post('/upload', upload.array('files'), (req: AuthenticatedRequest, res) =
   } catch (e: any) { res.status(500).json({ success: false, message: e.message }) }
 })
 
-router.get('/download', authenticateTokenFlexible, (req: AuthenticatedRequest, res) => {
+router.get('/download', authenticateToken, (req: AuthenticatedRequest, res) => {
+
   const filePath = req.query.path as string
   if (!filePath || !isValidPath(filePath)) return res.status(400).json({ success: false, message: '无效路径' })
   try {

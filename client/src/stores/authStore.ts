@@ -71,6 +71,7 @@ export const useAuthStore = create<AuthStore>((set) => ({
 
   checkHasUsers: async () => {
     const res = await apiClient.hasUsers()
-    return (res as any).hasUsers ?? true
+    return res.data?.hasUsers ?? true
   }
+
 }))

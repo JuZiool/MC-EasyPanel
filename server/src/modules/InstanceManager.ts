@@ -141,8 +141,9 @@ class InstanceManager extends EventEmitter {
           fs.rmSync(inst.workingDirectory, { recursive: true, force: true })
         }
       } catch (e) {
-        console.error('删除实例工作目录失败:', e)
+        logger.error('删除实例工作目录失败:', e)
       }
+
     }
     this.instances.delete(id)
     this.saveInstances()

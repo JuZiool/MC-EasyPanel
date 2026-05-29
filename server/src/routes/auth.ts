@@ -35,8 +35,10 @@ function writeUsers(users: any[]): void {
 
 router.get('/has-users', (_req, res) => {
   const users = readUsers()
-  res.json({ success: true, hasUsers: users.length > 0 })
+  res.json({ success: true, data: { hasUsers: users.length > 0 } })
 })
+
+
 
 router.post('/register', async (req, res) => {
   const users = readUsers()
