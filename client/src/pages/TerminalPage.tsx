@@ -21,15 +21,13 @@ export default function TerminalPage() {
 
   useEffect(() => {
     if (!token) return
-    socketClient.initialize(token)
 
     const instanceParam = searchParams.get('instance')
     if (instanceParam) setSelectedInstance(instanceParam)
 
     apiClient.getInstances().then(d => { if (d.success) setInstances(d.data || []) })
-
-    return () => { socketClient.disconnect() }
   }, [token])
+
 
   const termInitRef = useRef(false)
 

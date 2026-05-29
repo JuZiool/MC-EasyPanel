@@ -1,6 +1,24 @@
 import fs from 'fs'
 import path from 'path'
 
+// 单个实例日志文件最大 10MB，超过时轮转
+const MAX_LOG_SIZE = 10 * 1024 * 1024
+const MAX_LOG_FILES = 3
+
+function rotateLogIfNeeded(filePath: string) {
+  try {
+    if (fs.existsSync(filePath) && fs.statSync(filePath).size > MAX_LOG_SIZE) {
+      const last = `${filePath}.${MAX_LOG_FILES}`
+      if (fs.existsSync(last)) fs.unlinkSync(last)
+      for (let i = MAX_LOG_FILES - 1; i >= 1; i--) {
+        const old = `${filePath}.${i}`
+        if (fs.existsSync(old)) fs.renameSync(old, `${filePath}.${i + 1}`)
+      }
+      fs.renameSync(filePath, `${filePath}.1`)
+    }
+  } catch {}
+}
+
 class LogBuffer {
   private buffers: Map<string, string[]> = new Map()
   private logDir: string
@@ -29,7 +47,9 @@ class LogBuffer {
 
     if (instanceId) {
       try {
-        fs.appendFileSync(path.join(this.logDir, `${instanceId}.log`), data)
+        const logPath = path.join(this.logDir, `${instanceId}.log`)
+        rotateLogIfNeeded(logPath)
+        fs.appendFileSync(logPath, data)
       } catch {}
     }
   }

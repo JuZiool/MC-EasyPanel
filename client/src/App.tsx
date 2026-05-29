@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { useEffect } from 'react'
 import { useAuthStore } from './stores/authStore'
+import socketClient from './utils/socket'
 import LoginPage from './pages/LoginPage'
 import Layout from './components/Layout'
 import PageTransition from './components/PageTransition'
@@ -26,9 +27,18 @@ function PublicRoute({ children }: { children: React.ReactNode }) {
 }
 
 export default function App() {
-  const { verifyToken } = useAuthStore()
+  const { verifyToken, isAuthenticated, token } = useAuthStore()
 
   useEffect(() => { verifyToken() }, [])
+
+  // Socket 连接跟随认证状态：登录后建立，登出后断开
+  useEffect(() => {
+    if (isAuthenticated && token) {
+      socketClient.initialize(token)
+    } else {
+      socketClient.disconnect()
+    }
+  }, [isAuthenticated, token])
 
   return (
     <Routes>

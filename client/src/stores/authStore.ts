@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import apiClient from '../utils/api'
+import socketClient from '../utils/socket'
 import type { User } from '../types'
-
 interface AuthStore {
   isAuthenticated: boolean
   user: User | null
@@ -44,11 +44,13 @@ export const useAuthStore = create<AuthStore>((set) => ({
     set({ loading: false })
     return false
   },
-
   logout: () => {
     apiClient.setToken(null)
+    socketClient.disconnect()
     set({ isAuthenticated: false, user: null, token: null })
   },
+
+
 
   verifyToken: async () => {
     const token = localStorage.getItem('mc_easypanel_token')
