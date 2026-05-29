@@ -8,7 +8,12 @@
 git clone https://github.com/JuZiool/MC-EasyPanel.git
 cd Mc-EasyPanel
 
-# 构建并启动
+# 1. 复制环境变量模板并设置密钥（必填！）
+cp .env.example .env
+# 编辑 .env，将 JWT_SECRET 改为一个复杂随机字符串
+# 生成密钥：openssl rand -hex 32
+
+# 2. 构建并启动
 docker compose up --build -d
 ```
 
@@ -27,8 +32,11 @@ docker compose up --build -d
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `SERVER_PORT` | `3301` | 面板端口 |
-| `JWT_SECRET` | - | JWT 签名密钥（生产务必修改） |
+| `SERVER_PORT` | `3001` | 面板监听端口 |
+| `JWT_SECRET` | **无（必填）** | JWT 签名密钥，生产环境必须设置为复杂随机字符串 |
+| `DEV_MODE` | `false` | 设为 `true` 开启开发模式（放宽 CORS/CSP） |
+
+> `.env.example` 包含所有可用变量及其说明，部署时复制为 `.env` 后配置即可。
 
 ## 技术栈
 
