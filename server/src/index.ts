@@ -241,4 +241,45 @@ app.get('*', (_req, res) => {
 
 httpServer.listen(PORT, '0.0.0.0', () => {
   logger.info(`Mc-EasyPanel 服务已启动，端口: ${PORT}`)
+  // 启动日志缓冲区自动清理（每 10 分钟清理僵尸缓冲区）
+  logBuffer.startAutoCleanup()
 })
+
+// 优雅关闭
+function gracefulShutdown(signal: string) {
+  logger.info(`收到 ${signal} 信号，开始优雅关闭...`)
+
+  // 停止定时器
+  playerStatsRecorder.stop()
+  playerSessionTracker.stop()
+
+  // 停止日志缓冲区自动清理
+  logBuffer.stopAutoCleanup()
+
+  // 清理所有 PTY 终端
+  for (const [sessionId, pty] of activeTerminals) {
+    try { pty.kill() } catch {}
+    activeTerminals.delete(sessionId)
+    logBuffer.clear(sessionId)
+  }
+
+  // 清理实例
+  instanceManager.cleanup()
+
+  // 关闭 Socket.IO
+  io.close()
+
+  // 关闭 HTTP 服务器（30s 超时）
+  httpServer.close(() => {
+    logger.info('HTTP 服务器已关闭')
+    process.exit(0)
+  })
+
+  setTimeout(() => {
+    logger.warn('关闭超时，强制退出')
+    process.exit(1)
+  }, 30000)
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'))
+process.on('SIGINT', () => gracefulShutdown('SIGINT'))

@@ -21,7 +21,9 @@ function rotateLogIfNeeded(filePath: string) {
 
 class LogBuffer {
   private buffers: Map<string, string[]> = new Map()
+  private lastWriteTime: Map<string, number> = new Map()
   private logDir: string
+  private cleanupTimer: NodeJS.Timeout | null = null
 
   constructor() {
     const baseDir = process.cwd()
@@ -44,6 +46,7 @@ class LogBuffer {
     const buf = this.buffers.get(sessionId)!
     buf.push(data)
     if (buf.length > 10000) buf.splice(0, buf.length - 10000)
+    this.lastWriteTime.set(sessionId, Date.now())
 
     if (instanceId) {
       try {
@@ -69,6 +72,46 @@ class LogBuffer {
 
   clear(sessionId: string) {
     this.buffers.delete(sessionId)
+    this.lastWriteTime.delete(sessionId)
+  }
+
+  /**
+   * 清除超过指定分钟未写入的僵尸缓冲区
+   */
+  cleanupStale(maxAgeMinutes: number = 30) {
+    const now = Date.now()
+    const maxAge = maxAgeMinutes * 60 * 1000
+    let count = 0
+    for (const [sessionId, lastWrite] of this.lastWriteTime) {
+      if (now - lastWrite > maxAge) {
+        this.buffers.delete(sessionId)
+        this.lastWriteTime.delete(sessionId)
+        count++
+      }
+    }
+    if (count > 0) {
+      const { default: logger } = require('./logger.js')
+      logger.debug(`清理了 ${count} 个僵尸日志缓冲区`)
+    }
+  }
+
+  /**
+   * 启动自动清理（每 10 分钟运行一次）
+   */
+  startAutoCleanup() {
+    if (this.cleanupTimer) return
+    this.cleanupTimer = setInterval(() => this.cleanupStale(30), 10 * 60 * 1000)
+    this.cleanupTimer.unref()
+  }
+
+  /**
+   * 停止自动清理
+   */
+  stopAutoCleanup() {
+    if (this.cleanupTimer) {
+      clearInterval(this.cleanupTimer)
+      this.cleanupTimer = null
+    }
   }
 }
 
