@@ -11,7 +11,6 @@ services:
       - ./servers:/app/servers            # 服务器文件挂载入口
     command: >
       sh -c "chmod -R 777 /app/server/data && exec dumb-init node server/dist/index.js"
-    mem_limit: 512m                       # 容器内存硬限制
     restart: unless-stopped               # 非手动停止时自动重启
     environment:
       - TZ=Asia/Shanghai                  # 时区
