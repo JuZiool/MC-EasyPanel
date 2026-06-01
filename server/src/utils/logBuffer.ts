@@ -25,19 +25,21 @@ class LogBuffer {
   private logDir: string
   private cleanupTimer: NodeJS.Timeout | null = null
 
+  private possiblePaths: string[] = []
+
   constructor() {
     const baseDir = process.cwd()
-    const possiblePaths = [
-      path.join(baseDir, 'data', 'logs'),
-      path.join(baseDir, 'server', 'data', 'logs'),
+    this.possiblePaths = [
+      path.join(baseDir, 'server', 'data', 'logs'), // 优先使用挂载卷路径（Docker 持久化）
+      path.join(baseDir, 'data', 'logs'),            // 备选：开发环境或旧部署
     ]
-    let logDir = possiblePaths.find(p => {
+    let logDir = this.possiblePaths.find(p => {
       try {
         if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true })
         return true
       } catch { return false }
     })
-    this.logDir = logDir || possiblePaths[possiblePaths.length - 1]
+    this.logDir = logDir || this.possiblePaths[this.possiblePaths.length - 1]
     if (!fs.existsSync(this.logDir)) fs.mkdirSync(this.logDir, { recursive: true })
   }
 
@@ -63,10 +65,13 @@ class LogBuffer {
   }
 
   readInstanceLog(instanceId: string): string {
-    try {
-      const logPath = path.join(this.logDir, `${instanceId}.log`)
-      if (fs.existsSync(logPath)) return fs.readFileSync(logPath, 'utf-8')
-    } catch {}
+    // 按照路径优先级依次尝试（规则 7：涉及路径需要使用多个路径尝试）
+    for (const dir of [this.logDir, ...this.possiblePaths.filter(p => p !== this.logDir)]) {
+      try {
+        const logPath = path.join(dir, `${instanceId}.log`)
+        if (fs.existsSync(logPath)) return fs.readFileSync(logPath, 'utf-8')
+      } catch {}
+    }
     return ''
   }
 
