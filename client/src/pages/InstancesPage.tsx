@@ -23,51 +23,44 @@ export default function InstancesPage() {
   const [form, setForm] = useState<{ name: string; description: string; workingDirectory: string; startCommand: string; autoStart: boolean; stopCommand: Instance['stopCommand'] }>({ name: '', description: '', workingDirectory: '', startCommand: '', autoStart: false, stopCommand: 'stop' })
   const [removeFilesOnDelete, setRemoveFilesOnDelete] = useState(false)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
-  const [expandedCharts, setExpandedCharts] = useState<Set<string>>(new Set())
+  const [expandedCharts, setExpandedCharts] = useState<Set<string>>(() => {
+    try {
+      const saved = localStorage.getItem('mc_expanded_charts')
+      if (saved) return new Set(JSON.parse(saved))
+    } catch {}
+    return new Set()
+  })
   const [chartData, setChartData] = useState<Record<string, any>>({})
   const [playerSessions, setPlayerSessions] = useState<Record<string, PlayerSession[]>>({})
-  const [initLoaded, setInitLoaded] = useState(false)
   const dataLoadedRef = useRef(false)
 
   useEffect(() => { fetchInstances() }, [])
 
-  // 实例加载完成后默认展开所有图表
+  // 记住展开状态到 localStorage
   useEffect(() => {
-    if (instances.length > 0 && !initLoaded) {
-      setInitLoaded(true)
-      const all = new Set(instances.map(i => i.id))
-      setExpandedCharts(all)
-    }
-  }, [instances, initLoaded])
+    localStorage.setItem('mc_expanded_charts', JSON.stringify([...expandedCharts]))
+  }, [expandedCharts])
 
-  // 单独加载图表和玩家数据（与展开分离，避免 cancelled 竞态条件导致数据永不加载）
+  // 逐个恢复之前展开的图表数据（后台加载，不阻塞页面渲染）
   useEffect(() => {
     if (instances.length === 0 || dataLoadedRef.current) return
     dataLoadedRef.current = true
-
-    const loadAll = async () => {
-      const results = await Promise.all(instances.map(async (inst) => {
+    const loadExpanded = async () => {
+      for (const id of expandedCharts) {
+        if (chartData[id] && playerSessions[id]?.length !== undefined) continue
         const [chartRes, sessionRes] = await Promise.all([
-          apiClient.get(`/instances/${inst.id}/player-stats`),
-          apiClient.getInstancePlayerSessions(inst.id)
+          apiClient.get(`/instances/${id}/player-stats`),
+          apiClient.getInstancePlayerSessions(id)
         ])
-        return {
-          id: inst.id,
-          chartData: chartRes.data,
-          sessions: (sessionRes.data as PlayerSession[]) || []
+        if (chartRes.success && chartRes.data) {
+          setChartData(prev => (prev[id] ? prev : { ...prev, [id]: chartRes.data }))
         }
-      }))
-
-      const chartMap: Record<string, any> = {}
-      const sessionMap: Record<string, PlayerSession[]> = {}
-      for (const r of results) {
-        if (r.chartData) chartMap[r.id] = r.chartData
-        if (r.sessions) sessionMap[r.id] = r.sessions
+        if (sessionRes.success && sessionRes.data) {
+          setPlayerSessions(prev => (prev[id] ? prev : { ...prev, [id]: sessionRes.data as PlayerSession[] }))
+        }
       }
-      setChartData(chartMap)
-      setPlayerSessions(sessionMap)
     }
-    loadAll()
+    loadExpanded()
   }, [instances])
 
   const toggleChart = async (id: string) => {
