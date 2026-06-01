@@ -13,6 +13,7 @@ export default function TerminalPage() {
   const fitAddonRef = useRef<FitAddon | null>(null)
   const sessionIdRef = useRef<string>('')
   const currentInstanceRef = useRef<string>('')
+  const isFirstLoadForInstance = useRef<string>('')
   const [searchParams] = useSearchParams()
   const [instances, setInstances] = useState<any[]>([])
   const [selectedInstance, setSelectedInstance] = useState('')
@@ -96,22 +97,26 @@ export default function TerminalPage() {
   }, [token])
 
   // 选择实例时自动加载日志/实时输出
-
-  // 选择实例时自动加载日志/实时输出
   useEffect(() => {
     if (!selectedInstance || !xtermRef.current) return
 
     const inst = instances.find((i: any) => i.id === selectedInstance)
     if (!inst) return
 
-    // 清空终端，切换到新实例
-    xtermRef.current.reset()
-    sessionIdRef.current = inst.terminalSessionId || ''
-    currentInstanceRef.current = inst.id
-    setIsLive(inst.status === 'running' && !!inst.terminalSessionId)
-
-    // 加载历史日志
-    socketClient.getTerminalHistory(inst.terminalSessionId || '', inst.id)
+    if (isFirstLoadForInstance.current !== selectedInstance) {
+      // 用户切换了实例 → 清空终端并重新加载
+      isFirstLoadForInstance.current = selectedInstance
+      xtermRef.current.reset()
+      sessionIdRef.current = inst.terminalSessionId || ''
+      currentInstanceRef.current = inst.id
+      setIsLive(inst.status === 'running' && !!inst.terminalSessionId)
+      socketClient.getTerminalHistory(inst.terminalSessionId || '', inst.id)
+    } else {
+      // 只是实例列表轮询刷新 → 更新状态引用但不重置终端
+      currentInstanceRef.current = inst.id
+      if (inst.terminalSessionId) sessionIdRef.current = inst.terminalSessionId
+      setIsLive(inst.status === 'running' && !!inst.terminalSessionId)
+    }
   }, [selectedInstance, instances])
 
   return (

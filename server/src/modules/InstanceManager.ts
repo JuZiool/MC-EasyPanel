@@ -221,12 +221,12 @@ class InstanceManager extends EventEmitter {
     return true
   }
 
-  setInstanceStopped(id: string) {
+  setInstanceStopped(id: string, keepSession: boolean = true) {
     const inst = this.instances.get(id)
     if (!inst) return
     inst.status = 'stopped'
     inst.pid = undefined
-    inst.terminalSessionId = undefined
+    if (!keepSession) inst.terminalSessionId = undefined
     inst.lastStopped = new Date().toISOString()
     this.saveInstances()
     this.emit('instance-status-changed', { id, status: 'stopped' })
