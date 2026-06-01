@@ -50,9 +50,10 @@ app.use(helmet({
       imgSrc: ["'self'", 'data:', 'blob:'],
       connectSrc: ["'self'", 'ws:', 'wss:'],
       fontSrc: ["'self'", 'data:', 'https://fonts.gstatic.com'],
+      upgradeInsecureRequests: null, // 内网 HTTP 环境不要自动升级到 HTTPS
     }
   },
-  crossOriginOpenerPolicy: isDev ? false : { policy: 'same-origin' }
+  crossOriginOpenerPolicy: false // HTTP 内网环境不需要 COOP 头
 }))
 if (isDev) {
   app.use(cors())
