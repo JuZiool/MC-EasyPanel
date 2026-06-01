@@ -41,14 +41,15 @@ const io = new Server(httpServer, {
 app.set('io', io)
 
 app.use(helmet({
+  strictTransportSecurity: false, // 内网 HTTP 环境不需要 HSTS，否则浏览器强制 HTTPS 导致资源加载失败
   contentSecurityPolicy: isDev ? false : {
     directives: {
       defaultSrc: ["'self'"],
       scriptSrc: ["'self'", "'unsafe-inline'"],
-      styleSrc: ["'self'", "'unsafe-inline'"],
+      styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
       imgSrc: ["'self'", 'data:', 'blob:'],
       connectSrc: ["'self'", 'ws:', 'wss:'],
-      fontSrc: ["'self'", 'data:'],
+      fontSrc: ["'self'", 'data:', 'https://fonts.gstatic.com'],
     }
   },
   crossOriginOpenerPolicy: isDev ? false : { policy: 'same-origin' }
