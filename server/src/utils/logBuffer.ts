@@ -47,7 +47,10 @@ class LogBuffer {
     if (!this.buffers.has(sessionId)) this.buffers.set(sessionId, [])
     const buf = this.buffers.get(sessionId)!
     buf.push(data)
-    if (buf.length > 10000) buf.splice(0, buf.length - 10000)
+    if (buf.length > 10000) {
+      // 整块替换为新数组，让旧数组可被 GC 回收（splice 不会释放 V8 老生代内存）
+      this.buffers.set(sessionId, buf.slice(-10000))
+    }
     this.lastWriteTime.set(sessionId, Date.now())
 
     if (instanceId) {
@@ -76,6 +79,8 @@ class LogBuffer {
   }
 
   clear(sessionId: string) {
+    const buf = this.buffers.get(sessionId)
+    if (buf) buf.length = 0 // 先释放字符串引用，帮助 GC 更快回收
     this.buffers.delete(sessionId)
     this.lastWriteTime.delete(sessionId)
   }
@@ -89,6 +94,8 @@ class LogBuffer {
     let count = 0
     for (const [sessionId, lastWrite] of this.lastWriteTime) {
       if (now - lastWrite > maxAge) {
+        const buf = this.buffers.get(sessionId)
+        if (buf) buf.length = 0
         this.buffers.delete(sessionId)
         this.lastWriteTime.delete(sessionId)
         count++

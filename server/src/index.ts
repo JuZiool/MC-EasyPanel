@@ -108,6 +108,29 @@ instanceManager.on('instance-status-changed', (data) => {
 
 const activeTerminals = new Map<string, any>()
 
+// terminal-output 节流：合并短时间内的多次输出，减少 Socket.IO 内存压力
+const outputBatches = new Map<string, string>()
+let outputFlushTimer: NodeJS.Timeout | null = null
+
+function flushTerminalOutput() {
+  for (const [sid, combinedData] of outputBatches) {
+    io.emit('terminal-output', { sessionId: sid, data: combinedData })
+  }
+  outputBatches.clear()
+  outputFlushTimer = null
+}
+
+function queueTerminalOutput(sessionId: string, data: string) {
+  const existing = outputBatches.get(sessionId) || ''
+  outputBatches.set(sessionId, existing + data)
+  if (!outputFlushTimer) {
+    outputFlushTimer = setTimeout(flushTerminalOutput, 16)
+  }
+}
+
+// 追踪每个 socket 创建的独立 PTY 会话，用于断开时清理
+const socketSessions = new Map<string, Set<string>>()
+
 instanceManager.on('terminal-create', async ({ id, command, cwd, sessionId }) => {
   if (!command) return
   try {
@@ -118,12 +141,20 @@ instanceManager.on('terminal-create', async ({ id, command, cwd, sessionId }) =>
       { name: 'xterm-color', cols: 80, rows: 24, cwd: cwd || process.cwd(), env: process.env as any }
     )
     activeTerminals.set(sessionId, ptyProcess)
-    ptyProcess.onData((data: string) => {
+    const onDataDisposable = ptyProcess.onData((data: string) => {
       logBuffer.append(sessionId, data, id)
-      io.emit('terminal-output', { sessionId, data })
+      queueTerminalOutput(sessionId, data)
     })
     ptyProcess.onExit(() => {
+      // 刷出剩余输出
+      const remaining = outputBatches.get(sessionId)
+      if (remaining) {
+        io.emit('terminal-output', { sessionId, data: remaining })
+        outputBatches.delete(sessionId)
+      }
       io.emit('terminal-exit', { sessionId })
+      // 释放 onData 监听器闭包引用
+      onDataDisposable.dispose()
       logBuffer.clear(sessionId)
       instanceManager.setInstanceStopped(id)
       activeTerminals.delete(sessionId)
@@ -183,13 +214,24 @@ io.on('connection', (socket) => {
       activeTerminals.set(sessionId, ptyProcess)
       socket.join(sessionId)
 
-      ptyProcess.onData((data: string) => {
+      // 追踪该 socket 创建的 PTY 会话
+      if (!socketSessions.has(socket.id)) socketSessions.set(socket.id, new Set())
+      socketSessions.get(socket.id)!.add(sessionId)
+
+      const onDataDisposable = ptyProcess.onData((data: string) => {
         logBuffer.append(sessionId, data)
-        socket.emit('terminal-output', { sessionId, data })
+        queueTerminalOutput(sessionId, data)
       })
 
       ptyProcess.onExit(() => {
+        // 刷出剩余输出
+        const remaining = outputBatches.get(sessionId)
+        if (remaining) {
+          io.emit('terminal-output', { sessionId, data: remaining })
+          outputBatches.delete(sessionId)
+        }
         socket.emit('terminal-exit', { sessionId })
+        onDataDisposable.dispose()
         logBuffer.clear(sessionId)
         for (const inst of instanceManager.getInstances()) {
           if (inst.terminalSessionId === sessionId && inst.status === 'running') {
@@ -197,6 +239,7 @@ io.on('connection', (socket) => {
           }
         }
         activeTerminals.delete(sessionId)
+        socketSessions.get(socket.id)?.delete(sessionId)
       })
 
       socket.emit('pty-created', { sessionId })
@@ -231,6 +274,19 @@ io.on('connection', (socket) => {
 
   socket.on('disconnect', () => {
     logger.info(`Socket 已断开: ${socket.id}`)
+    // 清理该 socket 创建的独立 PTY 会话（不影响实例关联的 PTY）
+    const sessions = socketSessions.get(socket.id)
+    if (sessions) {
+      for (const sid of sessions) {
+        const pty = activeTerminals.get(sid)
+        if (pty) {
+          try { pty.kill() } catch {}
+          activeTerminals.delete(sid)
+          logBuffer.clear(sid)
+        }
+      }
+      socketSessions.delete(socket.id)
+    }
   })
 })
 
@@ -264,6 +320,16 @@ function gracefulShutdown(signal: string) {
     activeTerminals.delete(sessionId)
     logBuffer.clear(sessionId)
   }
+
+  // 清理输出批次缓冲
+  outputBatches.clear()
+  if (outputFlushTimer) {
+    clearTimeout(outputFlushTimer)
+    outputFlushTimer = null
+  }
+
+  // 清理 socket 会话追踪
+  socketSessions.clear()
 
   // 清理实例
   instanceManager.cleanup()

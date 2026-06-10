@@ -24,6 +24,7 @@ export class PlayerSessionTracker {
   private sessions: PlayerSession[] = []
   private filePath: string
   private options: PlayerSessionTrackerOptions
+  private lastCleanup = 0
 
   constructor(options: PlayerSessionTrackerOptions) {
     this.options = options
@@ -78,6 +79,13 @@ export class PlayerSessionTracker {
   }
 
   private async poll(): Promise<void> {
+    // 每 30 分钟清理一次过期会话（必须在 early return 之前，否则无运行实例时清理不触发）
+    const nowMs = Date.now()
+    if (nowMs - this.lastCleanup > 30 * 60 * 1000) {
+      this.lastCleanup = nowMs
+      this.cleanupOldSessions()
+    }
+
     try {
       const instances = this.options.getInstances().filter(i => i.status === 'running')
       if (instances.length === 0) return
@@ -152,5 +160,22 @@ export class PlayerSessionTracker {
    */
   getAllSessions(instanceId: string): PlayerSession[] {
     return this.sessions.filter(s => s.instanceId === instanceId)
+  }
+
+  /**
+   * 清理超过指定时间的非活跃会话（默认 7 天）
+   */
+  private cleanupOldSessions(maxAgeMs: number = 7 * 24 * 60 * 60 * 1000) {
+    const now = Date.now()
+    const before = this.sessions.length
+    this.sessions = this.sessions.filter(s => {
+      if (s.active) return true
+      return (now - new Date(s.lastSeen).getTime()) < maxAgeMs
+    })
+    const removed = before - this.sessions.length
+    if (removed > 0) {
+      logger.debug(`清理了 ${removed} 条过期玩家会话记录`)
+      this.saveSessions()
+    }
   }
 }
