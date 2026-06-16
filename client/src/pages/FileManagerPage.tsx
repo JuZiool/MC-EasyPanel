@@ -10,6 +10,7 @@ import socketClient from '../utils/socket'
 import CodeEditor from '../components/CodeEditor'
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
 import ProgressPanel from '../components/ProgressPanel'
+import UploadModal from '../components/UploadModal'
 import { isArchiveFile } from '../../../shared/archiveFormats.js'
 import { ArrowLeft, Upload, FilePlus, FolderPlus, RefreshCw, Download, Edit3, Trash2, FileText, Folder, Copy, Scissors, Edit, FileArchive, CheckSquare, Square, Link, Search, X, Shield } from 'lucide-react'
 
@@ -39,6 +40,7 @@ export default function FileManagerPage() {
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set())
   const [batchDelete, setBatchDelete] = useState(false)
   const [clipboard, setClipboard] = useState<{ paths: string[]; action: 'copy' | 'cut' } | null>(null)
+  const [showUploadModal, setShowUploadModal] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<import('../types').FileItem[] | null>(null)
   const [searching, setSearching] = useState(false)
@@ -311,10 +313,8 @@ export default function FileManagerPage() {
     setSearchResults(null)
   }
 
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const fileList = e.target.files
-    if (!fileList || fileList.length === 0) return
-    const files = Array.from(fileList)
+  const handleUploadFiles = async (files: File[]) => {
+    if (files.length === 0) return
 
     // 单个大文件（>20MB）使用分片上传
     if (files.length === 1) {
@@ -352,14 +352,12 @@ export default function FileManagerPage() {
           updateItem(opId, { progress: 100, status: 'completed', label: '上传完成' })
           addNotification({ type: 'success', title: '上传成功' })
           fetchFiles(currentPath)
-          e.target.value = ''
           setTimeout(() => removeItem(opId), 3000)
           return
         } catch (error: any) {
           // 分片上传失败，如果是取消操作则不报错
           if (error.message === 'Upload aborted') return
           addNotification({ type: 'error', title: '上传失败', message: error.message || '分片上传出错' })
-          e.target.value = ''
           return
         }
       }
@@ -369,7 +367,7 @@ export default function FileManagerPage() {
     const opId = genOpId()
     const fileNames = files.map(f => f.name).join(', ')
     addItem({ id: opId, type: 'upload', label: `上传中...`, subLabel: fileNames, progress: 0, status: 'active' })
-    const res = await apiClient.uploadFiles(currentPath, fileList, (p) => {
+    const res = await apiClient.uploadFiles(currentPath, files, (p) => {
       updateItem(opId, { progress: p, subLabel: `${fileNames} (${p}%)` })
     })
     if (res.success) {
@@ -380,7 +378,6 @@ export default function FileManagerPage() {
       addNotification({ type: 'error', title: '上传失败' })
     }
     fetchFiles(currentPath)
-    e.target.value = ''
     setTimeout(() => removeItem(opId), 3000)
   }
 
@@ -460,10 +457,9 @@ export default function FileManagerPage() {
             <button onClick={() => fetchFiles(currentPath)} className="p-2 rounded-lg text-gray-500 hover:bg-surface-100 transition-colors" title="刷新"><RefreshCw className="w-4 h-4" /></button>
             <button onClick={() => setShowNewFile(true)} className="flex items-center gap-1.5 px-3 py-2 text-sm text-gray-600 hover:bg-surface-100 rounded-lg transition-colors"><FilePlus className="w-4 h-4" />新建文件</button>
             <button onClick={() => setShowNewDir(true)} className="flex items-center gap-1.5 px-3 py-2 text-sm text-gray-600 hover:bg-surface-100 rounded-lg transition-colors"><FolderPlus className="w-4 h-4" />新建目录</button>
-            <label className="flex items-center gap-1.5 px-3 py-2 text-sm text-gray-600 hover:bg-surface-100 rounded-lg transition-colors cursor-pointer">
+            <button onClick={() => setShowUploadModal(true)} className="flex items-center gap-1.5 px-3 py-2 text-sm text-gray-600 hover:bg-surface-100 rounded-lg transition-colors cursor-pointer">
               <Upload className="w-4 h-4" />上传
-              <input type="file" multiple className="hidden" onChange={handleUpload} />
-            </label>
+            </button>
           </div>
         </div>
 
@@ -618,6 +614,14 @@ export default function FileManagerPage() {
           </motion.div>
         </motion.div>
       )}
+
+      <UploadModal
+        isOpen={showUploadModal}
+        onClose={() => setShowUploadModal(false)}
+        onUpload={async (files) => {
+          await handleUploadFiles(files)
+        }}
+      />
 
       <ConfirmDeleteDialog isOpen={!!deleteTarget} onClose={() => setDeleteTarget(null)} onConfirm={handleDelete} name={deleteTarget?.name || ''} type="文件" />
 

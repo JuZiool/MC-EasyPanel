@@ -96,7 +96,7 @@ class ApiClient {
     return this.post('/files/move', { path, destPath, operationId, socketId })
   }
 
-  async uploadFiles(path: string, files: FileList, onProgress?: (progress: number) => void) {
+  async uploadFiles(path: string, files: FileList | File[], onProgress?: (progress: number) => void) {
     const formData = new FormData()
     formData.append('path', path)
     Array.from(files).forEach(f => formData.append('files', f))
