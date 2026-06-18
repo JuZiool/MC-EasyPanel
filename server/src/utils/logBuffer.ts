@@ -73,7 +73,10 @@ class LogBuffer {
       try {
         const logPath = path.join(dir, `${instanceId}.log`)
         if (fs.existsSync(logPath)) return fs.readFileSync(logPath, 'utf-8')
-      } catch {}
+      } catch (e) {
+        const { default: logger } = require('./logger.js')
+        logger.warn(`读取实例日志失败 [${instanceId}] 路径 ${dir}: ${e instanceof Error ? e.message : e}`)
+      }
     }
     return ''
   }

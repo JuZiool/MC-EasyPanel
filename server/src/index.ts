@@ -113,11 +113,11 @@ const outputBatches = new Map<string, string>()
 let outputFlushTimer: NodeJS.Timeout | null = null
 
 function flushTerminalOutput() {
+  outputFlushTimer = null
   for (const [sid, combinedData] of outputBatches) {
     io.emit('terminal-output', { sessionId: sid, data: combinedData })
   }
   outputBatches.clear()
-  outputFlushTimer = null
 }
 
 function queueTerminalOutput(sessionId: string, data: string) {
@@ -180,6 +180,7 @@ instanceManager.on('instance-force-stop', ({ id }) => {
   if (inst && inst.terminalSessionId) {
     const pty = activeTerminals.get(inst.terminalSessionId)
     if (pty) { pty.kill(); activeTerminals.delete(inst.terminalSessionId) }
+    logBuffer.clear(inst.terminalSessionId)
   }
   instanceManager.setInstanceStopped(id)
 })
@@ -261,7 +262,10 @@ io.on('connection', (socket) => {
   socket.on('close-pty', ({ sessionId }) => {
     const pty = activeTerminals.get(sessionId)
     if (pty) {
-      logger.info(`终端会话已断开: ${sessionId}`)
+      try { pty.kill() } catch {}
+      activeTerminals.delete(sessionId)
+      logBuffer.clear(sessionId)
+      logger.info(`终端会话已断开并清理: ${sessionId}`)
     }
   })
 

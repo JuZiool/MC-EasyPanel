@@ -618,9 +618,7 @@ export default function FileManagerPage() {
       <UploadModal
         isOpen={showUploadModal}
         onClose={() => setShowUploadModal(false)}
-        onUpload={async (files) => {
-          await handleUploadFiles(files)
-        }}
+        onUpload={handleUploadFiles}
       />
 
       <ConfirmDeleteDialog isOpen={!!deleteTarget} onClose={() => setDeleteTarget(null)} onConfirm={handleDelete} name={deleteTarget?.name || ''} type="文件" />

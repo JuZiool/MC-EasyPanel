@@ -10,3 +10,6 @@ docs/
 .vscode/
 参考项目/
 AGENTS.md
+
+# Reasonix 工作目录
+.reasonix/

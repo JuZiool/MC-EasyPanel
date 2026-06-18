@@ -99,7 +99,7 @@ class ApiClient {
   async uploadFiles(path: string, files: FileList | File[], onProgress?: (progress: number) => void) {
     const formData = new FormData()
     formData.append('path', path)
-    Array.from(files).forEach(f => formData.append('files', f))
+    for (const f of files) formData.append('files', f)
     return this.post('/files/upload', formData, {
       timeout: 600000, // 上传超时设为 10 分钟（大压缩包上传需要更长时间）
       onUploadProgress: (e) => {

@@ -99,10 +99,11 @@ export default function UploadModal({ isOpen, onClose, onUpload }: UploadModalPr
       await onUpload(selectedFiles)
       reset()
       onClose()
-    } catch {
-      // 错误由上层处理
+    } catch (error) {
+      console.error('上传失败:', error)
     } finally {
       setUploading(false)
+      reset()
     }
   }
 
@@ -191,7 +192,7 @@ export default function UploadModal({ isOpen, onClose, onUpload }: UploadModalPr
             <div className="max-h-48 overflow-y-auto space-y-1.5">
               {selectedFiles.map((file, index) => (
                 <div
-                  key={`${file.name}-${index}`}
+                  key={`${file.name}-${file.size}-${file.lastModified}`}
                   className="flex items-center gap-2 px-3 py-2 rounded-lg bg-surface-50 group"
                 >
                   <File className="w-4 h-4 text-gray-400 shrink-0" />
