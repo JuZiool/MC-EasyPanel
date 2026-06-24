@@ -1,5 +1,6 @@
 import fs from 'fs'
 import path from 'path'
+import logger from './logger.js'
 
 // 单个实例日志文件最大 10MB，超过时轮转
 const MAX_LOG_SIZE = 10 * 1024 * 1024
@@ -74,7 +75,6 @@ class LogBuffer {
         const logPath = path.join(dir, `${instanceId}.log`)
         if (fs.existsSync(logPath)) return fs.readFileSync(logPath, 'utf-8')
       } catch (e) {
-        const { default: logger } = require('./logger.js')
         logger.warn(`读取实例日志失败 [${instanceId}] 路径 ${dir}: ${e instanceof Error ? e.message : e}`)
       }
     }
@@ -105,7 +105,6 @@ class LogBuffer {
       }
     }
     if (count > 0) {
-      const { default: logger } = require('./logger.js')
       logger.debug(`清理了 ${count} 个僵尸日志缓冲区`)
     }
   }
