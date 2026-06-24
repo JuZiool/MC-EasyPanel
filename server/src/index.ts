@@ -98,6 +98,9 @@ const playerSessionTracker = new PlayerSessionTracker({
     return queryMultipleInstancePlayers(
       instances.map(i => ({ id: i.id, name: i.name, workingDirectory: i.workingDirectory }))
     )
+  },
+  onUpdate: (sessionsByInstance) => {
+    io.emit('player-sessions-update', sessionsByInstance)
   }
 })
 playerSessionTracker.start()

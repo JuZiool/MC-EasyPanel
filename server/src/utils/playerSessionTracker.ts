@@ -17,6 +17,8 @@ export interface PlayerSession {
 interface PlayerSessionTrackerOptions {
   queryPlayers: (instances: { id: string; name: string; workingDirectory: string }[]) => Promise<Record<string, any>>
   getInstances: () => { id: string; name: string; workingDirectory: string; status: string }[]
+  /** 每次轮询完成后回调，传递实例ID到活跃会话的映射 */
+  onUpdate?: (sessionsByInstance: Record<string, PlayerSession[]>) => void
 }
 
 export class PlayerSessionTracker {
@@ -142,6 +144,18 @@ export class PlayerSessionTracker {
       // 有变化或有人在线上时才写入，减少 IO
       if (currentPlayers.size > 0 || changed) {
         this.saveSessions()
+      }
+
+      // 触发 onUpdate 回调，传递当前活跃会话
+      if (this.options.onUpdate) {
+        const sessionsByInstance: Record<string, PlayerSession[]> = {}
+        for (const inst of instances) {
+          const active = this.getActiveSessions(inst.id)
+          if (active.length > 0) {
+            sessionsByInstance[inst.id] = active
+          }
+        }
+        this.options.onUpdate(sessionsByInstance)
       }
     } catch (e: any) {
       logger.debug(`玩家会话轮询异常: ${e.message}`)

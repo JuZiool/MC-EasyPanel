@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import type { PlayerSession } from '../types'
 
 interface DataPoint {
   time: string
@@ -10,9 +11,11 @@ interface PlayerChartProps {
   data: DataPoint[]
   width?: number
   height?: number
+  /** 玩家会话记录，用于悬停时显示当时在线的玩家名称 */
+  playerSessions?: PlayerSession[]
 }
 
-export default function PlayerChart({ data, width = 320, height = 140 }: PlayerChartProps) {
+export default function PlayerChart({ data, width = 320, height = 140, playerSessions }: PlayerChartProps) {
   const chart = useMemo(() => {
     if (!data || data.length < 2) return null
 
@@ -66,8 +69,25 @@ export default function PlayerChart({ data, width = 320, height = 140 }: PlayerC
     const lastX = scaleX(points.length - 1)
     const lastY = scaleY(lastPt.online)
 
-    return { points, lineD, fillD, yTicks, xLabels, lastPt, lastX, lastY, pad, cw }
-  }, [data, width, height])
+    // 为每个数据点计算当时在线的玩家名称
+    const pointTooltips = points.map(d => {
+      if (!playerSessions || playerSessions.length === 0) return null
+      const t = new Date(d.time).getTime()
+      const players = playerSessions
+        .filter(s => {
+          const first = new Date(s.firstSeen).getTime()
+          // 如果会话活跃（active=true）或者 lastSeen 在当前快照时间之后
+          const last = s.active ? Infinity : new Date(s.lastSeen).getTime()
+          return first <= t && last >= t
+        })
+        .map(s => s.playerName)
+      // 去重
+      const unique = [...new Set(players)]
+      return unique.length > 0 ? unique : null
+    })
+
+    return { points, lineD, fillD, yTicks, xLabels, lastPt, lastX, lastY, pad, cw, pointTooltips }
+  }, [data, width, height, playerSessions])
 
   if (!chart) {
     return (
@@ -97,15 +117,21 @@ export default function PlayerChart({ data, width = 320, height = 140 }: PlayerC
         strokeLinecap="round" strokeLinejoin="round" />
 
       {/* 数据点 tooltip */}
-      {chart.points.map((d, i) => (
-        <g key={i}>
-          <title>{`${new Date(d.time).toLocaleString('zh-CN')} — ${d.online}/${d.max} 在线`}</title>
-          {i === chart.points.length - 1 && (
-            <circle cx={chart.lastX} cy={chart.lastY} r={3}
-              fill="#22c55e" stroke="#fff" strokeWidth={2} />
-          )}
-        </g>
-      ))}
+      {chart.points.map((d, i) => {
+        const players = chart.pointTooltips[i]
+        const timeStr = new Date(d.time).toLocaleString('zh-CN')
+        const baseTip = `${timeStr} — ${d.online}/${d.max} 在线`
+        const fullTip = players ? `${baseTip}\n玩家: ${players.join(', ')}` : baseTip
+        return (
+          <g key={i}>
+            <title>{fullTip}</title>
+            {i === chart.points.length - 1 && (
+              <circle cx={chart.lastX} cy={chart.lastY} r={3}
+                fill="#22c55e" stroke="#fff" strokeWidth={2} />
+            )}
+          </g>
+        )
+      })}
 
       {/* 当前人数标注 */}
       {chart.lastPt.online > 0 && (

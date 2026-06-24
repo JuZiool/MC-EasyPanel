@@ -9,6 +9,7 @@ import LoadingSpinner from '../components/LoadingSpinner'
 import PlayerChart from '../components/PlayerChart'
 import type { Instance, PlayerSession } from '../types'
 import { Plus, Play, Square, Terminal, Folder, Trash2, Server, BarChart3, Users, Pencil } from 'lucide-react'
+import socketClient from '../utils/socket'
 
 export default function InstancesPage() {
   const { instances, loading, fetchInstances } = useInstanceStore()
@@ -62,6 +63,29 @@ export default function InstancesPage() {
     }
     loadExpanded()
   }, [instances])
+
+  // 通过 WebSocket 实时接收玩家会话更新
+  useEffect(() => {
+    const handler = (data: Record<string, PlayerSession[]>) => {
+      setPlayerSessions(prev => {
+        const next = { ...prev }
+        for (const [instanceId, sessions] of Object.entries(data)) {
+          // 合并实时数据：将活跃会话与已有历史会话合并
+          const existing = next[instanceId] || []
+          const activeIds = new Set(sessions.map(s => `${s.playerId}:${s.instanceId}`))
+          // 保留非活跃的历史会话，替换相同 playerId+instanceId 的活跃会话
+          const merged = [
+            ...existing.filter(s => !s.active || !activeIds.has(`${s.playerId}:${s.instanceId}`)),
+            ...sessions
+          ]
+          next[instanceId] = merged
+        }
+        return next
+      })
+    }
+    socketClient.on('player-sessions-update', handler)
+    return () => { socketClient.off('player-sessions-update', handler) }
+  }, [])
 
   const toggleChart = async (id: string) => {
     const next = new Set(expandedCharts)
@@ -200,6 +224,12 @@ export default function InstancesPage() {
                     <h3 className="font-medium text-gray-800">{inst.name}</h3>
                     <p className="text-xs text-gray-400 mt-0.5 truncate">{inst.workingDirectory || inst.description || '未设置目录'}</p>
                     <span className="inline-block text-xs text-gray-400 mt-1 capitalize">{inst.status}</span>
+                    {inst.status === 'running' && playerSessions[inst.id]?.some(s => s.active) && (
+                      <span className="inline-flex items-center gap-1 text-xs text-green-600 bg-green-50 px-1.5 py-0.5 rounded-full mt-1 ml-2">
+                        <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                        {playerSessions[inst.id].filter(s => s.active).length} 在线
+                      </span>
+                    )}
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     <button onClick={() => toggleChart(inst.id)}
@@ -229,7 +259,7 @@ export default function InstancesPage() {
                           <div className="flex-1 min-w-0">
                             <h4 className="text-xs font-medium text-gray-500 mb-2">历史在线人数</h4>
                             {data ? (
-                              <PlayerChart data={data} width={400} height={140} />
+                              <PlayerChart data={data} width={400} height={140} playerSessions={playerSessions[inst.id]} />
                             ) : (
                               <div className="text-xs text-gray-400 py-6 text-center">加载中...</div>
                             )}
@@ -248,7 +278,13 @@ export default function InstancesPage() {
                                     if (!grouped[s.playerId]) grouped[s.playerId] = []
                                     grouped[s.playerId].push(s)
                                   }
-                                  return Object.entries(grouped).map(([playerId, sessions]) => {
+                                  // 按总在线时长从高到低排序
+                                  const sorted = Object.entries(grouped).sort(([, aSessions], [, bSessions]) => {
+                                    const aMs = getPlayerTotalDuration(aSessions)
+                                    const bMs = getPlayerTotalDuration(bSessions)
+                                    return bMs - aMs
+                                  })
+                                  return sorted.map(([playerId, sessions]) => {
                                     const isOnline = sessions.some(s => s.active)
                                     const totalMs = getPlayerTotalDuration(sessions)
                                     const playerName = sessions[0].playerName
