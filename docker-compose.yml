@@ -11,11 +11,11 @@ services:
       - ./servers:/app/servers            # 服务器文件挂载入口
     command: >
       sh -c "chmod -R 777 /app/server/data && exec dumb-init node server/dist/index.js"
-    restart: unless-stopped               # 非手动停止时自动重启
+    restart: always                         # 自动重启
     environment:
       - TZ=Asia/Shanghai                  # 时区
       - NODE_ENV=production               # 运行模式
       - PORT=3001                         # 面板监听端口
       - JWT_SECRET=${JWT_SECRET}  # JWT 签名密钥（必填！通过 .env 文件设置，不可使用默认值）
-      - NODE_OPTIONS=--max-old-space-size=512  # 限制 V8 堆上限，防止内存无限增长
+      # 内存限制已移除
 
