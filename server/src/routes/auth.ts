@@ -57,7 +57,7 @@ router.post('/register', async (req, res) => {
   writeUsers(users)
   const token = generateToken({ userId: user.id, username: user.username, role: user.role })
   logger.info(`首用户注册: ${username}`)
-  res.json({ success: true, token, user: { id: user.id, username: user.username, role: user.role } })
+  res.json({ success: true, data: { token, user: { id: user.id, username: user.username, role: user.role } } })
 })
 
 router.post('/login', async (req, res) => {
@@ -71,11 +71,11 @@ router.post('/login', async (req, res) => {
   user.lastLogin = new Date().toISOString()
   writeUsers(users)
   const token = generateToken({ userId: user.id, username: user.username, role: user.role })
-  res.json({ success: true, token, user: { id: user.id, username: user.username, role: user.role } })
+  res.json({ success: true, data: { token, user: { id: user.id, username: user.username, role: user.role } } })
 })
 
 router.get('/verify', authenticateToken, (req: AuthenticatedRequest, res) => {
-  res.json({ success: true, user: req.user })
+  res.json({ success: true, data: { user: { id: req.user!.userId, username: req.user!.username, role: req.user!.role } } })
 })
 
 router.post('/change-password', authenticateToken, async (req: AuthenticatedRequest, res) => {

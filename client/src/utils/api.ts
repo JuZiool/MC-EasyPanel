@@ -60,7 +60,7 @@ class ApiClient {
     return this.post<{ token: string; user: { id: string; username: string; role: string } }>('/auth/register', { username, password })
   }
   async verifyToken() {
-    return this.get<{ user: { userId: string; username: string; role: string } }>('/auth/verify')
+    return this.get<{ user: { id: string; username: string; role: string } }>('/auth/verify')
   }
   async changePassword(oldPassword: string, newPassword: string) { return this.post('/auth/change-password', { oldPassword, newPassword }) }
   async hasUsers() { return this.get<{ hasUsers: boolean }>('/auth/has-users') }

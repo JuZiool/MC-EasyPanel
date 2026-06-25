@@ -60,7 +60,7 @@ export const useAuthStore = create<AuthStore>((set) => ({
     apiClient.setToken(token)
     const res = await apiClient.verifyToken()
     if (res.success && res.data) {
-      set({ isAuthenticated: true, user: { id: res.data.user.userId, username: res.data.user.username, role: res.data.user.role }, token })
+      set({ isAuthenticated: true, user: res.data.user, token })
       return true
     }
     apiClient.setToken(null)
