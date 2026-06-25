@@ -17,10 +17,8 @@ const statusConfig: Record<string, { color: string; label: string }> = {
 export default function TerminalPage() {
   const terminalRef = useRef<HTMLDivElement>(null)
   const xtermRef = useRef<Terminal | null>(null)
-  const fitAddonRef = useRef<FitAddon | null>(null)
   const sessionIdRef = useRef<string>('')
   const currentInstanceRef = useRef<string>('')
-  const isFirstLoadForInstance = useRef<string>('')
   const [searchParams] = useSearchParams()
   const [instances, setInstances] = useState<any[]>([])
   const [selectedInstance, setSelectedInstance] = useState('')
@@ -31,10 +29,8 @@ export default function TerminalPage() {
   // 加载实例列表，轮询更新
   useEffect(() => {
     if (!token) return
-
     const instanceParam = searchParams.get('instance')
     if (instanceParam) setSelectedInstance(instanceParam)
-
     const fetchInstances = () => {
       apiClient.getInstances().then(d => { if (d.success) setInstances(d.data || []) })
     }
@@ -45,16 +41,9 @@ export default function TerminalPage() {
 
   const selectedInst = instances.find((i: any) => i.id === selectedInstance)
 
-  // 选中实例时创建 xterm，切换/取消时销毁
+  // ── 挂载时：xterm 创建一次 + Socket 监听全局注册 + ResizeObserver ──
   useEffect(() => {
-    if (!selectedInstance || !selectedInst || !terminalRef.current) return
-
-    // 销毁旧终端（如果有）
-    if (xtermRef.current) {
-      xtermRef.current.dispose()
-      xtermRef.current = null
-      fitAddonRef.current = null
-    }
+    if (!terminalRef.current) return
 
     const term = new Terminal({
       cursorBlink: true,
@@ -68,15 +57,17 @@ export default function TerminalPage() {
     term.open(terminalRef.current)
     fitAddon.fit()
     xtermRef.current = term
-    fitAddonRef.current = fitAddon
 
-    const onResize = () => fitAddon.fit()
-    window.addEventListener('resize', onResize)
+    // ResizeObserver：比 window.resize 更精确，侧栏折叠等也触发
+    const resizeObserver = new ResizeObserver(() => fitAddon.fit())
+    resizeObserver.observe(terminalRef.current)
 
+    // 用户输入 → Socket
     term.onData((data) => {
       if (sessionIdRef.current) socketClient.sendTerminalInput(sessionIdRef.current, data)
     })
 
+    // Socket 监听器—全局注册一次，通过 ref 判断目标
     const onPtyCreated = ({ sessionId, instanceId }: any) => {
       if (instanceId && instanceId === currentInstanceRef.current) {
         sessionIdRef.current = sessionId
@@ -84,7 +75,7 @@ export default function TerminalPage() {
       }
     }
     const onTerminalOutput = ({ sessionId, data }: any) => {
-      if (sessionId === sessionIdRef.current) term.write(data)
+      if (sessionId === sessionIdRef.current && data) term.write(data)
     }
     const onTerminalExit = ({ sessionId }: any) => {
       if (sessionId === sessionIdRef.current) {
@@ -98,9 +89,7 @@ export default function TerminalPage() {
       }
     }
     const onTerminalHistory = ({ sessionId, data }: any) => {
-      if (currentInstanceRef.current && data) {
-        term.write(data)
-      }
+      if (currentInstanceRef.current && data) term.write(data)
     }
 
     socketClient.on('pty-created', onPtyCreated)
@@ -109,15 +98,8 @@ export default function TerminalPage() {
     socketClient.on('terminal-error', onTerminalError)
     socketClient.on('terminal-history', onTerminalHistory)
 
-    // 初始化当前实例状态
-    isFirstLoadForInstance.current = selectedInstance
-    currentInstanceRef.current = selectedInst.id
-    sessionIdRef.current = selectedInst.terminalSessionId || ''
-    setIsLive(selectedInst.status === 'running' && !!selectedInst.terminalSessionId)
-    socketClient.getTerminalHistory(selectedInst.terminalSessionId || '', selectedInst.id)
-
     return () => {
-      window.removeEventListener('resize', onResize)
+      resizeObserver.disconnect()
       socketClient.off('pty-created', onPtyCreated)
       socketClient.off('terminal-output', onTerminalOutput)
       socketClient.off('terminal-exit', onTerminalExit)
@@ -125,11 +107,21 @@ export default function TerminalPage() {
       socketClient.off('terminal-history', onTerminalHistory)
       term.dispose()
       xtermRef.current = null
-      fitAddonRef.current = null
     }
+  }, [token])
+
+  // ── 切换实例时：只 reset + 切换引用 + 加载历史，不复用 xterm ──
+  useEffect(() => {
+    if (!selectedInstance || !selectedInst || !xtermRef.current) return
+
+    xtermRef.current.reset()
+    currentInstanceRef.current = selectedInst.id
+    sessionIdRef.current = selectedInst.terminalSessionId || ''
+    setIsLive(selectedInst.status === 'running' && !!selectedInst.terminalSessionId)
+    socketClient.getTerminalHistory(selectedInst.terminalSessionId || '', selectedInst.id)
   }, [selectedInstance])
 
-  // 实例轮询时更新状态引用
+  // ── 轮询刷新实例状态，只更新 ref 不重置终端 ──
   useEffect(() => {
     if (!selectedInstance || !xtermRef.current) return
     const inst = instances.find((i: any) => i.id === selectedInstance)
@@ -189,16 +181,16 @@ export default function TerminalPage() {
           </div>
         </div>
 
-        {/* 右侧终端区域 — 参考项目条件渲染方式 */}
+        {/* 右侧终端区域 */}
         <div className="flex-1 flex flex-col min-w-0">
-          {selectedInstance && selectedInst ? (
-            <>
-              {/* 实例信息栏 */}
-              <div className="flex items-center gap-3 px-4 py-2.5 bg-white rounded-xl border border-surface-200 mb-3 shrink-0">
-                <Server className="w-4 h-4 text-gray-500" />
-                <span className="text-sm font-medium text-gray-700">{selectedInst.name}</span>
+          {/* 信息栏 — 固定高度 h-11，选中/未选布局一致 */}
+          <div className={`flex items-center gap-3 px-4 h-11 bg-white rounded-xl border border-surface-200 mb-3 shrink-0 transition-opacity ${selectedInstance && selectedInst ? '' : 'invisible'}`}>
+            {selectedInst && (
+              <>
+                <Server className="w-4 h-4 text-gray-500 shrink-0" />
+                <span className="text-sm font-medium text-gray-700 truncate">{selectedInst.name}</span>
                 {statusInfo && (
-                  <span className={`flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full ${
+                  <span className={`flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full shrink-0 ${
                     selectedInst.status === 'running' ? 'bg-green-50 text-green-600' :
                     selectedInst.status === 'error' ? 'bg-red-50 text-red-600' :
                     'bg-gray-100 text-gray-500'
@@ -208,33 +200,30 @@ export default function TerminalPage() {
                   </span>
                 )}
                 {isLive
-                  ? <span className="text-xs text-green-500 font-medium flex items-center gap-1 ml-auto"><span className="w-2 h-2 rounded-full bg-green-500 inline-block animate-pulse" />实时输出</span>
-                  : <span className="text-xs text-gray-500 italic ml-auto">历史日志（只读）</span>
+                  ? <span className="text-xs text-green-500 font-medium flex items-center gap-1 ml-auto shrink-0"><span className="w-2 h-2 rounded-full bg-green-500 inline-block animate-pulse" />实时输出</span>
+                  : <span className="text-xs text-gray-500 italic ml-auto shrink-0">历史日志（只读）</span>
                 }
-              </div>
+              </>
+            )}
+          </div>
 
-              {/* 终端容器 */}
-              <div className="flex-1 min-h-0 relative rounded-xl overflow-hidden border border-surface-200 isolate">
-                <div ref={terminalRef} className="w-full h-full" />
-                {xtermRef.current === null && (
-                  <div className="absolute inset-0 flex items-center justify-center bg-white z-10">
-                    <div className="w-8 h-8 border-2 border-primary-400 border-t-transparent rounded-full animate-spin" />
+          {/* 终端容器 — 始终在 DOM 中，保证 xterm 初始化 */}
+          <div className="flex-1 min-h-0 relative rounded-xl overflow-hidden border border-surface-200 isolate">
+            <div ref={terminalRef} className="w-full h-full" />
+
+            {/* 未选择实例时的空态浮层 */}
+            {(!selectedInstance || !selectedInst) && (
+              <div className="absolute inset-0 flex items-center justify-center bg-white z-10">
+                <div className="text-center space-y-3">
+                  <div className="w-14 h-14 mx-auto rounded-2xl bg-surface-100 flex items-center justify-center">
+                    <TerminalIcon className="w-7 h-7 text-gray-300" />
                   </div>
-                )}
-              </div>
-            </>
-          ) : (
-            // 未选择实例 — flex-1 占满整块区域，与选中态高度一致
-            <div className="flex-1 flex items-center justify-center bg-white rounded-xl border border-surface-200">
-              <div className="text-center space-y-3">
-                <div className="w-14 h-14 mx-auto rounded-2xl bg-surface-100 flex items-center justify-center">
-                  <TerminalIcon className="w-7 h-7 text-gray-300" />
+                  <p className="text-sm text-gray-400">请从左侧选择一个实例</p>
+                  <p className="text-xs text-gray-300">选择后将显示该实例的终端或日志</p>
                 </div>
-                <p className="text-sm text-gray-400">请从左侧选择一个实例</p>
-                <p className="text-xs text-gray-300">选择后将显示该实例的终端或日志</p>
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </div>
     </div>
