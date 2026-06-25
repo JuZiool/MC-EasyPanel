@@ -186,8 +186,8 @@ export default function TerminalPage() {
 
         {/* 右侧终端区域 */}
         <div className="flex-1 flex flex-col min-w-0">
-          {/* 实例信息栏（始终渲染，无选择时隐藏） */}
-          <div className={`flex items-center gap-3 px-4 py-2.5 bg-white rounded-xl border border-surface-200 mb-3 shrink-0 transition-opacity ${selectedInstance && selectedInst ? '' : 'opacity-0 pointer-events-none absolute'}`}>
+          {/* 实例信息栏 — 始终在流中占据固定高度，保证右侧布局一致 */}
+          <div className={`flex items-center gap-3 px-4 py-2.5 bg-white rounded-xl border border-surface-200 mb-3 shrink-0 transition-opacity ${selectedInstance && selectedInst ? '' : 'opacity-0 invisible'}`}>
             {selectedInst && (
               <>
                 <Server className="w-4 h-4 text-gray-500" />
