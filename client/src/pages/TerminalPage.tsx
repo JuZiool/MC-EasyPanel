@@ -9,9 +9,9 @@ import { useAuthStore } from '../stores/authStore'
 import { Server, Terminal as TerminalIcon, ChevronRight } from 'lucide-react'
 
 const statusConfig: Record<string, { color: string; label: string }> = {
-  running: { color: 'bg-green-500', label: '运行中' },
-  stopped: { color: 'bg-gray-400', label: '已停止' },
-  error: { color: 'bg-red-500', label: '错误' },
+  running: { color: 'bg-green-500', label: 'running' },
+  stopped: { color: 'bg-gray-400', label: 'stopped' },
+  error: { color: 'bg-red-500', label: 'error' },
 }
 
 export default function TerminalPage() {
@@ -19,6 +19,7 @@ export default function TerminalPage() {
   const xtermRef = useRef<Terminal | null>(null)
   const sessionIdRef = useRef<string>('')
   const currentInstanceRef = useRef<string>('')
+  const prevInstanceIdRef = useRef<string>('')
   const [searchParams] = useSearchParams()
   const [instances, setInstances] = useState<any[]>([])
   const [selectedInstance, setSelectedInstance] = useState('')
@@ -26,7 +27,7 @@ export default function TerminalPage() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const token = useAuthStore(s => s.token)
 
-  // 加载实例列表，轮询更新
+  // Load instance list, poll every 3s
   useEffect(() => {
     if (!token) return
     const instanceParam = searchParams.get('instance')
@@ -41,7 +42,7 @@ export default function TerminalPage() {
 
   const selectedInst = instances.find((i: any) => i.id === selectedInstance)
 
-  // ── 挂载时：xterm 创建一次 + Socket 监听全局注册 + ResizeObserver ──
+  // Mount: create xterm once + register Socket listeners + ResizeObserver
   useEffect(() => {
     if (!terminalRef.current) return
 
@@ -58,16 +59,13 @@ export default function TerminalPage() {
     fitAddon.fit()
     xtermRef.current = term
 
-    // ResizeObserver：比 window.resize 更精确，侧栏折叠等也触发
     const resizeObserver = new ResizeObserver(() => fitAddon.fit())
     resizeObserver.observe(terminalRef.current)
 
-    // 用户输入 → Socket
     term.onData((data) => {
       if (sessionIdRef.current) socketClient.sendTerminalInput(sessionIdRef.current, data)
     })
 
-    // Socket 监听器—全局注册一次，通过 ref 判断目标
     const onPtyCreated = ({ sessionId, instanceId }: any) => {
       if (instanceId && instanceId === currentInstanceRef.current) {
         sessionIdRef.current = sessionId
@@ -79,17 +77,17 @@ export default function TerminalPage() {
     }
     const onTerminalExit = ({ sessionId }: any) => {
       if (sessionId === sessionIdRef.current) {
-        term.write('\r\n\x1b[31m进程已退出\x1b[0m\r\n')
+        term.write('\r\n\x1b[31mProcess exited\x1b[0m\r\n')
         setIsLive(false)
       }
     }
     const onTerminalError = ({ sessionId, error }: any) => {
       if (sessionId === sessionIdRef.current) {
-        term.write(`\r\n\x1b[31m错误: ${error}\x1b[0m\r\n`)
+        term.write(`\r\n\x1b[31mError: ${error}\x1b[0m\r\n`)
       }
     }
     const onTerminalHistory = ({ sessionId, data }: any) => {
-      if (currentInstanceRef.current && data) term.write(data)
+      if (sessionId === sessionIdRef.current && data) term.write(data)
     }
 
     socketClient.on('pty-created', onPtyCreated)
@@ -110,42 +108,44 @@ export default function TerminalPage() {
     }
   }, [token])
 
-  // ── 切换实例时：只 reset + 切换引用 + 加载历史，不复用 xterm ──
-  useEffect(() => {
-    if (!selectedInstance || !selectedInst || !xtermRef.current) return
-
-    xtermRef.current.reset()
-    currentInstanceRef.current = selectedInst.id
-    sessionIdRef.current = selectedInst.terminalSessionId || ''
-    setIsLive(selectedInst.status === 'running' && !!selectedInst.terminalSessionId)
-    socketClient.getTerminalHistory(selectedInst.terminalSessionId || '', selectedInst.id)
-  }, [selectedInstance])
-
-  // ── 轮询刷新实例状态，只更新 ref 不重置终端 ──
+  // Unified handler: instance switch (reset + history) and poll refresh (update refs only)
   useEffect(() => {
     if (!selectedInstance || !xtermRef.current) return
     const inst = instances.find((i: any) => i.id === selectedInstance)
     if (!inst) return
+
+    const prevId = prevInstanceIdRef.current
+    const isSwitch = prevId !== selectedInstance
+    prevInstanceIdRef.current = selectedInstance
+
+    if (isSwitch) {
+      xtermRef.current.reset()
+    }
+
     currentInstanceRef.current = inst.id
-    if (inst.terminalSessionId) sessionIdRef.current = inst.terminalSessionId
+    sessionIdRef.current = inst.terminalSessionId || ''
     setIsLive(inst.status === 'running' && !!inst.terminalSessionId)
-  }, [instances])
+
+    if (isSwitch) {
+      socketClient.getTerminalHistory(inst.terminalSessionId || '', inst.id)
+    }
+  }, [selectedInstance, instances])
 
   const statusInfo = selectedInst ? statusConfig[selectedInst.status] || statusConfig.stopped : null
 
   return (
     <div className="flex flex-col min-h-0 lg:h-[calc(100vh-3rem)]">
-      <h1 className="text-xl font-semibold text-gray-800 mb-4 shrink-0">终端控制台</h1>
+      <h1 className="text-xl font-semibold text-gray-800 mb-4 shrink-0">Terminal</h1>
 
       <div className="flex-1 flex gap-4 min-h-0">
-        {/* 左侧实例列表 */}
+        {/* Left sidebar: instance list */}
         <div className={`shrink-0 flex flex-col bg-white rounded-xl border border-surface-200 transition-all ${sidebarCollapsed ? 'w-12' : 'w-56'}`}>
           <div className="flex items-center justify-between px-3 py-2.5 border-b border-surface-100">
-            {!sidebarCollapsed && <span className="text-xs font-medium text-gray-500">实例列表</span>}
+            {!sidebarCollapsed && <span className="text-xs font-medium text-gray-500">Instances</span>}
             <button
               onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
               className={`p-1 rounded text-gray-400 hover:text-gray-600 hover:bg-surface-100 transition-colors ${sidebarCollapsed ? 'mx-auto' : ''}`}
-              title={sidebarCollapsed ? '展开' : '折叠'}
+              title={sidebarCollapsed ? 'Expand' : 'Collapse'}
             >
               <ChevronRight className={`w-4 h-4 transition-transform ${sidebarCollapsed ? '' : 'rotate-180'}`} />
             </button>
@@ -176,14 +176,14 @@ export default function TerminalPage() {
               )
             })}
             {instances.length === 0 && !sidebarCollapsed && (
-              <p className="px-2.5 py-4 text-xs text-gray-400 text-center">暂无实例</p>
+              <p className="px-2.5 py-4 text-xs text-gray-400 text-center">No instances</p>
             )}
           </div>
         </div>
 
-        {/* 右侧终端区域 */}
+        {/* Right side: terminal area */}
         <div className="flex-1 flex flex-col min-w-0">
-          {/* 信息栏 — 固定高度 h-11，选中/未选布局一致 */}
+          {/* Info bar - fixed height h-11, consistent layout between selected/unselected */}
           <div className={`flex items-center gap-3 px-4 h-11 bg-white rounded-xl border border-surface-200 mb-3 shrink-0 transition-opacity ${selectedInstance && selectedInst ? '' : 'invisible'}`}>
             {selectedInst && (
               <>
@@ -200,26 +200,26 @@ export default function TerminalPage() {
                   </span>
                 )}
                 {isLive
-                  ? <span className="text-xs text-green-500 font-medium flex items-center gap-1 ml-auto shrink-0"><span className="w-2 h-2 rounded-full bg-green-500 inline-block animate-pulse" />实时输出</span>
-                  : <span className="text-xs text-gray-500 italic ml-auto shrink-0">历史日志（只读）</span>
+                  ? <span className="text-xs text-green-500 font-medium flex items-center gap-1 ml-auto shrink-0"><span className="w-2 h-2 rounded-full bg-green-500 inline-block animate-pulse" />Live</span>
+                  : <span className="text-xs text-gray-500 italic ml-auto shrink-0">Read-only history</span>
                 }
               </>
             )}
           </div>
 
-          {/* 终端容器 — 始终在 DOM 中，保证 xterm 初始化 */}
+          {/* Terminal container - always in DOM for xterm init */}
           <div className="flex-1 min-h-0 relative rounded-xl overflow-hidden border border-surface-200 isolate">
             <div ref={terminalRef} className="w-full h-full" />
 
-            {/* 未选择实例时的空态浮层 */}
+            {/* Empty state overlay when no instance selected */}
             {(!selectedInstance || !selectedInst) && (
               <div className="absolute inset-0 flex items-center justify-center bg-white z-10">
                 <div className="text-center space-y-3">
                   <div className="w-14 h-14 mx-auto rounded-2xl bg-surface-100 flex items-center justify-center">
                     <TerminalIcon className="w-7 h-7 text-gray-300" />
                   </div>
-                  <p className="text-sm text-gray-400">请从左侧选择一个实例</p>
-                  <p className="text-xs text-gray-300">选择后将显示该实例的终端或日志</p>
+                  <p className="text-sm text-gray-400">Select an instance from the left</p>
+                  <p className="text-xs text-gray-300">Its terminal or logs will appear here</p>
                 </div>
               </div>
             )}
