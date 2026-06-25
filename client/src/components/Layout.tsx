@@ -58,7 +58,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           <button onClick={() => setSidebarOpen(true)} className="text-gray-500"><Menu className="w-5 h-5" /></button>
           <span className="font-semibold text-gray-700">Mc-EasyPanel</span>
         </header>
-        <main className="flex-1 p-4 lg:p-6 overflow-auto relative flex flex-col">{children}</main>
+        <main className="flex-1 p-4 lg:p-6 overflow-auto relative">{children}</main>
       </div>
     </div>
   )
