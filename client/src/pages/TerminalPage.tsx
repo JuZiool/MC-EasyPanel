@@ -40,7 +40,7 @@ export default function TerminalPage() {
   const prevInstanceIdRef = useRef<string>('')
   const [searchParams] = useSearchParams()
   const [instances, setInstances] = useState<any[]>([])
-  const [selectedInstance, setSelectedInstance] = useState('')
+  const [selectedInstance, setSelectedInstance] = useState(() => localStorage.getItem('terminal_selectedInstance') || '')
   const [isLive, setIsLive] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('terminal_sidebarCollapsed') === 'true')
   const token = useAuthStore(s => s.token)
@@ -57,6 +57,11 @@ export default function TerminalPage() {
     const interval = setInterval(fetchInstances, 3000)
     return () => clearInterval(interval)
   }, [token])
+
+  // 记住选中的实例
+  useEffect(() => {
+    if (selectedInstance) localStorage.setItem('terminal_selectedInstance', selectedInstance)
+  }, [selectedInstance])
 
   const selectedInst = instances.find((i: any) => i.id === selectedInstance)
 

@@ -53,9 +53,14 @@ export default function FileManagerPage() {
   const [editPathValue, setEditPathValue] = useState('')
 
   useEffect(() => {
-    const pathParam = searchParams.get('path') || '/app/servers'
+    const pathParam = searchParams.get('path') || localStorage.getItem('filemanager_lastPath') || '/app/servers'
     fetchFiles(pathParam)
   }, [])
+
+  // 记住最后访问的目录
+  useEffect(() => {
+    if (currentPath) localStorage.setItem('filemanager_lastPath', currentPath)
+  }, [currentPath])
 
   // 文件操作完成后自动刷新列表
   useEffect(() => {
