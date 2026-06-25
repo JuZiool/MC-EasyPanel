@@ -186,10 +186,10 @@ export default function TerminalPage() {
 
         {/* 右侧终端区域 */}
         <div className="flex-1 flex flex-col min-w-0">
-          {selectedInstance && selectedInst ? (
-            <>
-              {/* 实例信息栏 */}
-              <div className="flex items-center gap-3 px-4 py-2.5 bg-white rounded-xl border border-surface-200 mb-3 shrink-0">
+          {/* 实例信息栏（始终渲染，无选择时隐藏） */}
+          <div className={`flex items-center gap-3 px-4 py-2.5 bg-white rounded-xl border border-surface-200 mb-3 shrink-0 transition-opacity ${selectedInstance && selectedInst ? '' : 'opacity-0 pointer-events-none absolute'}`}>
+            {selectedInst && (
+              <>
                 <Server className="w-4 h-4 text-gray-500" />
                 <span className="text-sm font-medium text-gray-700">{selectedInst.name}</span>
                 {statusInfo && (
@@ -206,25 +206,26 @@ export default function TerminalPage() {
                   ? <span className="text-xs text-green-500 font-medium flex items-center gap-1 ml-auto"><span className="w-2 h-2 rounded-full bg-green-500 inline-block animate-pulse" />实时输出</span>
                   : <span className="text-xs text-gray-500 italic ml-auto">历史日志（只读）</span>
                 }
-              </div>
+              </>
+            )}
+          </div>
 
-              {/* 终端容器 — 圆角矩形 */}
-              <div className="flex-1 min-h-0">
-                <div ref={terminalRef} className="w-full h-full rounded-xl overflow-hidden border border-surface-200" />
-              </div>
-            </>
-          ) : (
-            // 未选择实例时的占位
-            <div className="flex-1 flex items-center justify-center bg-white rounded-xl border border-surface-200">
-              <div className="text-center space-y-3">
-                <div className="w-14 h-14 mx-auto rounded-2xl bg-surface-100 flex items-center justify-center">
-                  <TerminalIcon className="w-7 h-7 text-gray-300" />
+          {/* 终端容器 — 始终在 DOM 中，保证 xterm 能初始化 */}
+          <div className="flex-1 min-h-0 relative">
+            <div ref={terminalRef} className="w-full h-full rounded-xl overflow-hidden border border-surface-200" />
+            {/* 未选择实例时的占位浮层 */}
+            {(!selectedInstance || !selectedInst) && (
+              <div className="absolute inset-0 flex items-center justify-center bg-white rounded-xl border border-surface-200 z-10">
+                <div className="text-center space-y-3">
+                  <div className="w-14 h-14 mx-auto rounded-2xl bg-surface-100 flex items-center justify-center">
+                    <TerminalIcon className="w-7 h-7 text-gray-300" />
+                  </div>
+                  <p className="text-sm text-gray-400">请从左侧选择一个实例</p>
+                  <p className="text-xs text-gray-300">选择后将显示该实例的终端或日志</p>
                 </div>
-                <p className="text-sm text-gray-400">请从左侧选择一个实例</p>
-                <p className="text-xs text-gray-300">选择后将显示该实例的终端或日志</p>
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </div>
     </div>
