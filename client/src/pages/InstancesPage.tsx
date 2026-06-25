@@ -146,10 +146,15 @@ export default function InstancesPage() {
 
   const handleStop = async (id: string) => {
     setActionLoading(id)
-    await apiClient.stopInstance(id)
-    setActionLoading(null)
-    addNotification({ type: 'info', title: '正在停止...' })
-    setTimeout(fetchInstances, 3000)
+    try {
+      await apiClient.stopInstance(id)
+      addNotification({ type: 'info', title: '正在停止...' })
+      setTimeout(fetchInstances, 3000)
+    } catch {
+      addNotification({ type: 'error', title: '停止失败', message: '网络错误' })
+    } finally {
+      setActionLoading(null)
+    }
   }
 
   const handleDelete = async () => {

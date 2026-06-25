@@ -24,9 +24,10 @@ export const useAuthStore = create<AuthStore>((set) => ({
   login: async (username, password) => {
     set({ loading: true })
     const res = await apiClient.login(username, password)
-    if (res.success && (res as any).token) {
-      apiClient.setToken((res as any).token)
-      set({ isAuthenticated: true, user: (res as any).user, token: (res as any).token, loading: false })
+    if (res.success && res.data) {
+      const { token, user } = res.data
+      apiClient.setToken(token)
+      set({ isAuthenticated: true, user, token, loading: false })
       return true
     }
     set({ loading: false })
@@ -36,9 +37,10 @@ export const useAuthStore = create<AuthStore>((set) => ({
   register: async (username, password) => {
     set({ loading: true })
     const res = await apiClient.register(username, password)
-    if (res.success && (res as any).token) {
-      apiClient.setToken((res as any).token)
-      set({ isAuthenticated: true, user: (res as any).user, token: (res as any).token, loading: false })
+    if (res.success && res.data) {
+      const { token, user } = res.data
+      apiClient.setToken(token)
+      set({ isAuthenticated: true, user, token, loading: false })
       return true
     }
     set({ loading: false })
@@ -57,8 +59,8 @@ export const useAuthStore = create<AuthStore>((set) => ({
     if (!token) return false
     apiClient.setToken(token)
     const res = await apiClient.verifyToken()
-    if (res.success && (res as any).user) {
-      set({ isAuthenticated: true, user: (res as any).user, token })
+    if (res.success && res.data) {
+      set({ isAuthenticated: true, user: { id: res.data.user.userId, username: res.data.user.username, role: res.data.user.role }, token })
       return true
     }
     apiClient.setToken(null)

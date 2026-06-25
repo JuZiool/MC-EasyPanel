@@ -63,8 +63,12 @@ if (isDev) {
 app.use(express.json({ limit: '10mb' }))
 app.use(express.urlencoded({ extended: true }))
 
-// 确保 data 目录存在
-const dataDir = path.resolve(process.cwd(), 'server', 'data')
+// 确保 data 目录存在（支持多路径）
+const possibleDataDirs = [
+  path.resolve(process.cwd(), 'data'),
+  path.resolve(process.cwd(), 'server', 'data'),
+]
+const dataDir = possibleDataDirs.find(dir => fs.existsSync(dir)) || possibleDataDirs[0]
 if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true })
 
 // 静态文件

@@ -4,7 +4,6 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { useFileStore } from '../stores/fileStore'
 import { useNotificationStore } from '../stores/notificationStore'
 import { useProgressStore, onProgressComplete } from '../stores/progressStore'
-import { useAuthStore } from '../stores/authStore'
 import apiClient from '../utils/api'
 import socketClient from '../utils/socket'
 import CodeEditor from '../components/CodeEditor'
@@ -56,8 +55,6 @@ export default function FileManagerPage() {
   useEffect(() => {
     const pathParam = searchParams.get('path') || '/app/servers'
     fetchFiles(pathParam)
-    const token = useAuthStore.getState().token
-    if (token) socketClient.initialize(token)
   }, [])
 
   // 文件操作完成后自动刷新列表
