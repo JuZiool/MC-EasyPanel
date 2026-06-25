@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
@@ -43,12 +43,19 @@ export default function TerminalPage() {
     return () => clearInterval(interval)
   }, [token])
 
-  const termInitRef = useRef(false)
+  const selectedInst = instances.find((i: any) => i.id === selectedInstance)
 
-  // 初始化 xterm（仅一次）
+  // 选中实例时创建 xterm，切换/取消时销毁
   useEffect(() => {
-    if (!terminalRef.current || termInitRef.current) return
-    termInitRef.current = true
+    if (!selectedInstance || !selectedInst || !terminalRef.current) return
+
+    // 销毁旧终端（如果有）
+    if (xtermRef.current) {
+      xtermRef.current.dispose()
+      xtermRef.current = null
+      fitAddonRef.current = null
+    }
+
     const term = new Terminal({
       cursorBlink: true,
       cursorStyle: 'block',
@@ -70,70 +77,68 @@ export default function TerminalPage() {
       if (sessionIdRef.current) socketClient.sendTerminalInput(sessionIdRef.current, data)
     })
 
-    // 实例 PTY 创建时自动附着
-    socketClient.on('pty-created', ({ sessionId, instanceId }) => {
+    const onPtyCreated = ({ sessionId, instanceId }: any) => {
       if (instanceId && instanceId === currentInstanceRef.current) {
         sessionIdRef.current = sessionId
         setIsLive(true)
       }
-    })
-    socketClient.on('terminal-output', ({ sessionId, data }) => {
+    }
+    const onTerminalOutput = ({ sessionId, data }: any) => {
       if (sessionId === sessionIdRef.current) term.write(data)
-    })
-    socketClient.on('terminal-exit', ({ sessionId }) => {
+    }
+    const onTerminalExit = ({ sessionId }: any) => {
       if (sessionId === sessionIdRef.current) {
         term.write('\r\n\x1b[31m进程已退出\x1b[0m\r\n')
         setIsLive(false)
       }
-    })
-    socketClient.on('terminal-error', ({ sessionId, error }) => {
+    }
+    const onTerminalError = ({ sessionId, error }: any) => {
       if (sessionId === sessionIdRef.current) {
         term.write(`\r\n\x1b[31m错误: ${error}\x1b[0m\r\n`)
       }
-    })
-    socketClient.on('terminal-history', ({ sessionId, data }) => {
+    }
+    const onTerminalHistory = ({ sessionId, data }: any) => {
       if (currentInstanceRef.current && data) {
         term.write(data)
       }
-    })
+    }
+
+    socketClient.on('pty-created', onPtyCreated)
+    socketClient.on('terminal-output', onTerminalOutput)
+    socketClient.on('terminal-exit', onTerminalExit)
+    socketClient.on('terminal-error', onTerminalError)
+    socketClient.on('terminal-history', onTerminalHistory)
+
+    // 初始化当前实例状态
+    isFirstLoadForInstance.current = selectedInstance
+    currentInstanceRef.current = selectedInst.id
+    sessionIdRef.current = selectedInst.terminalSessionId || ''
+    setIsLive(selectedInst.status === 'running' && !!selectedInst.terminalSessionId)
+    socketClient.getTerminalHistory(selectedInst.terminalSessionId || '', selectedInst.id)
 
     return () => {
       window.removeEventListener('resize', onResize)
-      socketClient.off('pty-created')
-      socketClient.off('terminal-output')
-      socketClient.off('terminal-exit')
-      socketClient.off('terminal-error')
-      socketClient.off('terminal-history')
+      socketClient.off('pty-created', onPtyCreated)
+      socketClient.off('terminal-output', onTerminalOutput)
+      socketClient.off('terminal-exit', onTerminalExit)
+      socketClient.off('terminal-error', onTerminalError)
+      socketClient.off('terminal-history', onTerminalHistory)
       term.dispose()
       xtermRef.current = null
       fitAddonRef.current = null
     }
-  }, [token])
+  }, [selectedInstance])
 
-  // 选择实例时自动加载日志/实时输出
+  // 实例轮询时更新状态引用
   useEffect(() => {
     if (!selectedInstance || !xtermRef.current) return
-
     const inst = instances.find((i: any) => i.id === selectedInstance)
     if (!inst) return
+    currentInstanceRef.current = inst.id
+    if (inst.terminalSessionId) sessionIdRef.current = inst.terminalSessionId
+    setIsLive(inst.status === 'running' && !!inst.terminalSessionId)
+  }, [instances])
 
-    if (isFirstLoadForInstance.current !== selectedInstance) {
-      // 用户切换了实例 → 清空终端并重新加载
-      isFirstLoadForInstance.current = selectedInstance
-      xtermRef.current.reset()
-      sessionIdRef.current = inst.terminalSessionId || ''
-      currentInstanceRef.current = inst.id
-      setIsLive(inst.status === 'running' && !!inst.terminalSessionId)
-      socketClient.getTerminalHistory(inst.terminalSessionId || '', inst.id)
-    } else {
-      // 只是实例列表轮询刷新 → 更新状态引用但不重置终端
-      currentInstanceRef.current = inst.id
-      if (inst.terminalSessionId) sessionIdRef.current = inst.terminalSessionId
-      setIsLive(inst.status === 'running' && !!inst.terminalSessionId)
-    }
-  }, [selectedInstance, instances])
-
-  const selectedInst = instances.find((i: any) => i.id === selectedInstance)
   const statusInfo = selectedInst ? statusConfig[selectedInst.status] || statusConfig.stopped : null
 
   return (
@@ -184,12 +189,12 @@ export default function TerminalPage() {
           </div>
         </div>
 
-        {/* 右侧终端区域 */}
+        {/* 右侧终端区域 — 参考项目条件渲染方式 */}
         <div className="flex-1 flex flex-col min-w-0">
-          {/* 实例信息栏 — 始终在流中占据固定高度，保证右侧布局一致 */}
-          <div className={`flex items-center gap-3 px-4 py-2.5 bg-white rounded-xl border border-surface-200 mb-3 shrink-0 transition-opacity ${selectedInstance && selectedInst ? '' : 'opacity-0 invisible'}`}>
-            {selectedInst && (
-              <>
+          {selectedInstance && selectedInst ? (
+            <>
+              {/* 实例信息栏 */}
+              <div className="flex items-center gap-3 px-4 py-2.5 bg-white rounded-xl border border-surface-200 mb-3 shrink-0">
                 <Server className="w-4 h-4 text-gray-500" />
                 <span className="text-sm font-medium text-gray-700">{selectedInst.name}</span>
                 {statusInfo && (
@@ -206,26 +211,30 @@ export default function TerminalPage() {
                   ? <span className="text-xs text-green-500 font-medium flex items-center gap-1 ml-auto"><span className="w-2 h-2 rounded-full bg-green-500 inline-block animate-pulse" />实时输出</span>
                   : <span className="text-xs text-gray-500 italic ml-auto">历史日志（只读）</span>
                 }
-              </>
-            )}
-          </div>
-
-          {/* 终端容器 — 始终在 DOM 中，保证 xterm 能初始化 */}
-          <div className="flex-1 min-h-0 relative">
-            <div ref={terminalRef} className="w-full h-full rounded-xl overflow-hidden border border-surface-200" />
-            {/* 未选择实例时的占位浮层 */}
-            {(!selectedInstance || !selectedInst) && (
-              <div className="absolute inset-0 flex items-center justify-center bg-white rounded-xl border border-surface-200 z-10">
-                <div className="text-center space-y-3">
-                  <div className="w-14 h-14 mx-auto rounded-2xl bg-surface-100 flex items-center justify-center">
-                    <TerminalIcon className="w-7 h-7 text-gray-300" />
-                  </div>
-                  <p className="text-sm text-gray-400">请从左侧选择一个实例</p>
-                  <p className="text-xs text-gray-300">选择后将显示该实例的终端或日志</p>
-                </div>
               </div>
-            )}
-          </div>
+
+              {/* 终端容器 */}
+              <div className="flex-1 min-h-0 relative">
+                <div ref={terminalRef} className="w-full h-full rounded-xl overflow-hidden border border-surface-200" />
+                {xtermRef.current === null && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-white rounded-xl border border-surface-200 z-10">
+                    <div className="w-8 h-8 border-2 border-primary-400 border-t-transparent rounded-full animate-spin" />
+                  </div>
+                )}
+              </div>
+            </>
+          ) : (
+            // 未选择实例 — flex-1 占满整块区域，与选中态高度一致
+            <div className="flex-1 flex items-center justify-center bg-white rounded-xl border border-surface-200">
+              <div className="text-center space-y-3">
+                <div className="w-14 h-14 mx-auto rounded-2xl bg-surface-100 flex items-center justify-center">
+                  <TerminalIcon className="w-7 h-7 text-gray-300" />
+                </div>
+                <p className="text-sm text-gray-400">请从左侧选择一个实例</p>
+                <p className="text-xs text-gray-300">选择后将显示该实例的终端或日志</p>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
