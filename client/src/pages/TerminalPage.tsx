@@ -42,7 +42,7 @@ export default function TerminalPage() {
   const [instances, setInstances] = useState<any[]>([])
   const [selectedInstance, setSelectedInstance] = useState('')
   const [isLive, setIsLive] = useState(false)
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('terminal_sidebarCollapsed') === 'true')
   const token = useAuthStore(s => s.token)
 
   // 加载实例列表，每 3 秒轮询
@@ -159,7 +159,7 @@ export default function TerminalPage() {
           <div className="flex items-center justify-between px-3 py-2.5 border-b border-surface-100">
             {!sidebarCollapsed && <span className="text-xs font-medium text-gray-500">实例列表</span>}
             <button
-              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+              onClick={() => { const v = !sidebarCollapsed; setSidebarCollapsed(v); localStorage.setItem('terminal_sidebarCollapsed', String(v)) }}
               className={`p-1 rounded text-gray-400 hover:text-gray-600 hover:bg-surface-100 transition-colors ${sidebarCollapsed ? 'mx-auto' : ''}`}
               title={sidebarCollapsed ? '展开' : '折叠'}
             >
