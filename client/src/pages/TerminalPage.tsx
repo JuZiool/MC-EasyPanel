@@ -6,6 +6,13 @@ import '@xterm/xterm/css/xterm.css'
 import socketClient from '../utils/socket'
 import apiClient from '../utils/api'
 import { useAuthStore } from '../stores/authStore'
+import { Server, Terminal as TerminalIcon, ChevronRight } from 'lucide-react'
+
+const statusConfig: Record<string, { color: string; label: string }> = {
+  running: { color: 'bg-green-500', label: '运行中' },
+  stopped: { color: 'bg-gray-400', label: '已停止' },
+  error: { color: 'bg-red-500', label: '错误' },
+}
 
 export default function TerminalPage() {
   const terminalRef = useRef<HTMLDivElement>(null)
@@ -18,20 +25,27 @@ export default function TerminalPage() {
   const [instances, setInstances] = useState<any[]>([])
   const [selectedInstance, setSelectedInstance] = useState('')
   const [isLive, setIsLive] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const token = useAuthStore(s => s.token)
 
+  // 加载实例列表，轮询更新
   useEffect(() => {
     if (!token) return
 
     const instanceParam = searchParams.get('instance')
     if (instanceParam) setSelectedInstance(instanceParam)
 
-    apiClient.getInstances().then(d => { if (d.success) setInstances(d.data || []) })
+    const fetchInstances = () => {
+      apiClient.getInstances().then(d => { if (d.success) setInstances(d.data || []) })
+    }
+    fetchInstances()
+    const interval = setInterval(fetchInstances, 3000)
+    return () => clearInterval(interval)
   }, [token])
-
 
   const termInitRef = useRef(false)
 
+  // 初始化 xterm（仅一次）
   useEffect(() => {
     if (!terminalRef.current || termInitRef.current) return
     termInitRef.current = true
@@ -119,22 +133,100 @@ export default function TerminalPage() {
     }
   }, [selectedInstance, instances])
 
+  const selectedInst = instances.find((i: any) => i.id === selectedInstance)
+  const statusInfo = selectedInst ? statusConfig[selectedInst.status] || statusConfig.stopped : null
+
   return (
-    <div className="space-y-4">
-      <h1 className="text-xl font-semibold text-gray-800">终端控制台</h1>
-      <div className="flex items-center gap-3 flex-wrap">
-        <select value={selectedInstance} onChange={e => setSelectedInstance(e.target.value)}
-          className="px-3 py-2 rounded-lg border border-surface-200 bg-white text-sm text-gray-700 focus:border-primary-400 outline-none">
-          <option value="">选择实例</option>
-          {instances.map((i: any) => <option key={i.id} value={i.id}>{i.name} ({i.status})</option>)}
-        </select>
-        {selectedInstance && (
-          isLive
-            ? <span className="text-xs text-green-500 font-medium flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-green-500 inline-block" />实时输出</span>
-            : <span className="text-xs text-gray-500 italic">← 历史日志（只读）</span>
-        )}
+    <div className="h-full flex flex-col">
+      <h1 className="text-xl font-semibold text-gray-800 mb-4 shrink-0">终端控制台</h1>
+
+      <div className="flex-1 flex gap-4 min-h-0">
+        {/* 左侧实例列表 */}
+        <div className={`shrink-0 flex flex-col bg-white rounded-xl border border-surface-200 transition-all ${sidebarCollapsed ? 'w-12' : 'w-56'}`}>
+          <div className="flex items-center justify-between px-3 py-2.5 border-b border-surface-100">
+            {!sidebarCollapsed && <span className="text-xs font-medium text-gray-500">实例列表</span>}
+            <button
+              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+              className={`p-1 rounded text-gray-400 hover:text-gray-600 hover:bg-surface-100 transition-colors ${sidebarCollapsed ? 'mx-auto' : ''}`}
+              title={sidebarCollapsed ? '展开' : '折叠'}
+            >
+              <ChevronRight className={`w-4 h-4 transition-transform ${sidebarCollapsed ? '' : 'rotate-180'}`} />
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto p-1.5 space-y-0.5">
+            {instances.map((inst: any) => {
+              const info = statusConfig[inst.status] || statusConfig.stopped
+              const isActive = inst.id === selectedInstance
+              return (
+                <button
+                  key={inst.id}
+                  onClick={() => setSelectedInstance(inst.id)}
+                  className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm text-left transition-colors ${
+                    isActive
+                      ? 'bg-primary-50 text-primary-700'
+                      : 'text-gray-600 hover:bg-surface-50 hover:text-gray-800'
+                  }`}
+                  title={inst.name}
+                >
+                  <Server className="w-4 h-4 shrink-0" />
+                  {!sidebarCollapsed && (
+                    <>
+                      <span className="flex-1 truncate">{inst.name}</span>
+                      <span className={`w-2 h-2 rounded-full shrink-0 ${info.color}`} title={info.label} />
+                    </>
+                  )}
+                </button>
+              )
+            })}
+            {instances.length === 0 && !sidebarCollapsed && (
+              <p className="px-2.5 py-4 text-xs text-gray-400 text-center">暂无实例</p>
+            )}
+          </div>
+        </div>
+
+        {/* 右侧终端区域 */}
+        <div className="flex-1 flex flex-col min-w-0">
+          {selectedInstance && selectedInst ? (
+            <>
+              {/* 实例信息栏 */}
+              <div className="flex items-center gap-3 px-4 py-2.5 bg-white rounded-xl border border-surface-200 mb-3 shrink-0">
+                <Server className="w-4 h-4 text-gray-500" />
+                <span className="text-sm font-medium text-gray-700">{selectedInst.name}</span>
+                {statusInfo && (
+                  <span className={`flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full ${
+                    selectedInst.status === 'running' ? 'bg-green-50 text-green-600' :
+                    selectedInst.status === 'error' ? 'bg-red-50 text-red-600' :
+                    'bg-gray-100 text-gray-500'
+                  }`}>
+                    <span className={`w-1.5 h-1.5 rounded-full ${statusInfo.color}`} />
+                    {statusInfo.label}
+                  </span>
+                )}
+                {isLive
+                  ? <span className="text-xs text-green-500 font-medium flex items-center gap-1 ml-auto"><span className="w-2 h-2 rounded-full bg-green-500 inline-block animate-pulse" />实时输出</span>
+                  : <span className="text-xs text-gray-500 italic ml-auto">历史日志（只读）</span>
+                }
+              </div>
+
+              {/* 终端容器 — 圆角矩形 */}
+              <div className="flex-1 min-h-0">
+                <div ref={terminalRef} className="w-full h-full rounded-xl overflow-hidden border border-surface-200" />
+              </div>
+            </>
+          ) : (
+            // 未选择实例时的占位
+            <div className="flex-1 flex items-center justify-center bg-white rounded-xl border border-surface-200">
+              <div className="text-center space-y-3">
+                <div className="w-14 h-14 mx-auto rounded-2xl bg-surface-100 flex items-center justify-center">
+                  <TerminalIcon className="w-7 h-7 text-gray-300" />
+                </div>
+                <p className="text-sm text-gray-400">请从左侧选择一个实例</p>
+                <p className="text-xs text-gray-300">选择后将显示该实例的终端或日志</p>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
-      <div ref={terminalRef} className="w-full aspect-[4/5] rounded-xl overflow-hidden border border-surface-200 max-h-[calc(100vh-12rem)]" />
     </div>
   )
 }
