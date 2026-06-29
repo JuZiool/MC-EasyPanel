@@ -5,7 +5,7 @@ import { useInstanceStore } from '../stores/instanceStore'
 import { useNotificationStore } from '../stores/notificationStore'
 import apiClient from '../utils/api'
 import { Play, Square, Terminal, FileText, Server, Power, PowerOff, Users } from 'lucide-react'
-import type { ServerPlayerInfo } from '../types'
+import type { ServerPlayerInfo, Instance } from '../types'
 
 export default function DashboardPage() {
   const { instances, fetchInstances } = useInstanceStore()
@@ -71,6 +71,15 @@ export default function DashboardPage() {
     return d.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
   }
 
+  /** 实时总计运行时长：运行中 = 历史累计 + 本次已运行，已停止 = 历史累计 */
+  const getRealtimeTotal = (inst: Instance) => {
+    let total = inst.totalRunDuration || 0
+    if (inst.status === 'running' && inst.lastStarted) {
+      total += Date.now() - new Date(inst.lastStarted).getTime()
+    }
+    return total
+  }
+
   const quickActions = [
     { icon: Server, label: '新建实例', onClick: () => navigate('/instances'), color: 'bg-primary-100 text-primary-600' },
     { icon: Terminal, label: '终端控制台', onClick: () => navigate('/terminal'), color: 'bg-blue-100 text-blue-600' },
@@ -134,7 +143,7 @@ export default function DashboardPage() {
                         <span className="text-gray-500">上次</span> {formatDateTime(inst.lastStarted)}
                       </p>
                       <p className="truncate">
-                        <span className="text-gray-500">总计</span> {formatMsDuration(inst.totalRunDuration)}
+                        <span className="text-gray-500">总计</span> {formatMsDuration(getRealtimeTotal(inst))}
                         <span className="mx-1.5 text-gray-300">|</span>
                         <span className="text-gray-500">本次</span>{' '}
                         {inst.status === 'running' && inst.lastStarted
