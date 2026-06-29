@@ -20,6 +20,7 @@ export interface Instance {
   terminalSessionId?: string
   instanceType?: 'minecraft-java' | 'generic'
   javaVersion?: string
+  totalRunDuration: number
 }
 
 class InstanceManager extends EventEmitter {
@@ -51,6 +52,7 @@ class InstanceManager extends EventEmitter {
             inst.status = 'stopped'
             inst.pid = undefined
             inst.terminalSessionId = undefined
+            if (typeof inst.totalRunDuration !== 'number') inst.totalRunDuration = 0
             this.instances.set(inst.id, inst)
           })
         }
@@ -62,8 +64,8 @@ class InstanceManager extends EventEmitter {
     if (this.saveTimeout) clearTimeout(this.saveTimeout)
     this.saveTimeout = setTimeout(() => {
       try {
-        const data = Array.from(this.instances.values()).map(({ id, name, description, workingDirectory, startCommand, autoStart, stopCommand, createdAt, lastStarted, lastStopped, instanceType, javaVersion }) => ({
-          id, name, description, workingDirectory, startCommand, autoStart, stopCommand, createdAt, lastStarted, lastStopped, instanceType, javaVersion
+        const data = Array.from(this.instances.values()).map(({ id, name, description, workingDirectory, startCommand, autoStart, stopCommand, createdAt, lastStarted, lastStopped, totalRunDuration, instanceType, javaVersion }) => ({
+          id, name, description, workingDirectory, startCommand, autoStart, stopCommand, createdAt, lastStarted, lastStopped, totalRunDuration, instanceType, javaVersion
         }))
         fs.writeFileSync(this.configPath, JSON.stringify(data, null, 2))
       } catch (e) { logger.error(`保存实例数据失败: ${e}`) }
@@ -112,6 +114,7 @@ class InstanceManager extends EventEmitter {
       stopCommand: data.stopCommand || 'stop',
       status: 'stopped',
       createdAt: new Date().toISOString(),
+      totalRunDuration: 0,
       instanceType: data.instanceType || 'generic',
       javaVersion: data.javaVersion
     }
@@ -224,6 +227,11 @@ class InstanceManager extends EventEmitter {
   setInstanceStopped(id: string, keepSession: boolean = true) {
     const inst = this.instances.get(id)
     if (!inst) return
+    // 累计本次运行时长
+    if (inst.lastStarted) {
+      const duration = Date.now() - new Date(inst.lastStarted).getTime()
+      inst.totalRunDuration = (inst.totalRunDuration || 0) + duration
+    }
     inst.status = 'stopped'
     inst.pid = undefined
     if (!keepSession) inst.terminalSessionId = undefined

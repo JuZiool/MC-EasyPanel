@@ -27,6 +27,7 @@ export interface Instance {
   terminalSessionId?: string
   instanceType?: 'minecraft-java' | 'generic'
   javaVersion?: string
+  totalRunDuration: number
 }
 
 export interface ApiResponse<T = any> {

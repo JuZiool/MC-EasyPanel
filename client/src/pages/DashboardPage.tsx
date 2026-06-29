@@ -47,17 +47,6 @@ export default function DashboardPage() {
   const running = instances.filter(i => i.status === 'running').length
   const stopped = instances.filter(i => i.status === 'stopped').length
 
-  const formatTime = (iso?: string) => {
-    if (!iso) return '-'
-    const d = new Date(iso)
-    const now = new Date()
-    const diff = now.getTime() - d.getTime()
-    if (diff < 60000) return '刚刚'
-    if (diff < 3600000) return `${Math.floor(diff / 60000)} 分钟前`
-    if (diff < 86400000) return `${Math.floor(diff / 3600000)} 小时前`
-    return d.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
-  }
-
   const formatDuration = (iso?: string) => {
     if (!iso) return null
     const diff = Date.now() - new Date(iso).getTime()
@@ -65,6 +54,21 @@ export default function DashboardPage() {
     const m = Math.floor((diff % 3600000) / 60000)
     if (h > 0) return `${h}h ${m}m`
     return `${m}m`
+  }
+
+  const formatMsDuration = (ms: number) => {
+    if (!ms || ms <= 0) return '-'
+    const h = Math.floor(ms / 3600000)
+    const m = Math.floor((ms % 3600000) / 60000)
+    if (h > 0) return `${h}h ${m}m`
+    if (m > 0) return `${m}m`
+    return '<1m'
+  }
+
+  const formatDateTime = (iso?: string) => {
+    if (!iso) return '-'
+    const d = new Date(iso)
+    return d.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
   }
 
   const quickActions = [
@@ -118,17 +122,31 @@ export default function DashboardPage() {
           <AnimatePresence>
             {instances.map(inst => (
               <motion.div key={inst.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-                className="flex items-center justify-between py-2 border-b border-surface-100 last:border-0">
-                <div className="flex items-center gap-3 min-w-0">
-                  <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${inst.status === 'running' ? 'bg-green-500' : inst.status === 'starting' ? 'bg-yellow-400 animate-pulse' : 'bg-gray-300'}`} />
-                  <div className="min-w-0">
-                    <p className="text-sm text-gray-700 truncate">{inst.name}</p>
-                    <p className="text-xs text-gray-400">
-                      {inst.status === 'running' && inst.lastStarted ? `已运行 ${formatDuration(inst.lastStarted)}` : formatTime(inst.lastStarted)}
-                    </p>
+                className="flex items-start justify-between py-2.5 border-b border-surface-100 last:border-0">
+                <div className="flex items-start gap-2.5 min-w-0 flex-1">
+                  <span className={`w-2.5 h-2.5 rounded-full shrink-0 mt-0.5 ${inst.status === 'running' ? 'bg-green-500' : inst.status === 'starting' ? 'bg-yellow-400 animate-pulse' : 'bg-gray-300'}`} />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm text-gray-700 truncate font-medium">{inst.name}</p>
+                    <div className="text-xs text-gray-400 mt-1 space-y-0.5">
+                      <p className="truncate">
+                        <span className="text-gray-500">创建</span> {formatDateTime(inst.createdAt)}
+                        <span className="mx-1.5 text-gray-300">|</span>
+                        <span className="text-gray-500">上次</span> {formatDateTime(inst.lastStarted)}
+                      </p>
+                      <p className="truncate">
+                        <span className="text-gray-500">总计</span> {formatMsDuration(inst.totalRunDuration)}
+                        <span className="mx-1.5 text-gray-300">|</span>
+                        <span className="text-gray-500">本次</span>{' '}
+                        {inst.status === 'running' && inst.lastStarted
+                          ? formatDuration(inst.lastStarted)
+                          : inst.lastStarted && inst.lastStopped
+                            ? formatMsDuration(new Date(inst.lastStopped).getTime() - new Date(inst.lastStarted).getTime())
+                            : '-'}
+                      </p>
+                    </div>
                   </div>
                 </div>
-                <div className="flex items-center gap-1 shrink-0">
+                <div className="flex items-center gap-1 shrink-0 ml-2 mt-0.5">
                   <button onClick={() => navigate(`/terminal?instance=${inst.id}`)} className="p-1.5 rounded text-gray-400 hover:text-gray-600 hover:bg-surface-100"><Terminal className="w-3.5 h-3.5" /></button>
                   <button onClick={() => navigate(`/files?path=${encodeURIComponent(inst.workingDirectory)}`)} className="p-1.5 rounded text-gray-400 hover:text-gray-600 hover:bg-surface-100"><FileText className="w-3.5 h-3.5" /></button>
                   {inst.status === 'running' ? (
