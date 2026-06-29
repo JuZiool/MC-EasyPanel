@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion } from 'framer-motion'
 import { useInstanceStore } from '../stores/instanceStore'
 import { useNotificationStore } from '../stores/notificationStore'
 import apiClient from '../utils/api'
@@ -8,7 +8,7 @@ import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
 import LoadingSpinner from '../components/LoadingSpinner'
 import PlayerChart from '../components/PlayerChart'
 import type { Instance, PlayerSession } from '../types'
-import { Plus, Play, Square, Terminal, Folder, Trash2, Server, BarChart3, Users, Pencil } from 'lucide-react'
+import { Plus, Play, Square, Terminal, Folder, Trash2, Server, Users, Pencil } from 'lucide-react'
 import socketClient from '../utils/socket'
 
 export default function InstancesPage() {
@@ -24,44 +24,31 @@ export default function InstancesPage() {
   const [form, setForm] = useState<{ name: string; description: string; workingDirectory: string; startCommand: string; autoStart: boolean; stopCommand: Instance['stopCommand'] }>({ name: '', description: '', workingDirectory: '', startCommand: '', autoStart: false, stopCommand: 'stop' })
   const [removeFilesOnDelete, setRemoveFilesOnDelete] = useState(false)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
-  const [expandedCharts, setExpandedCharts] = useState<Set<string>>(() => {
-    try {
-      const saved = localStorage.getItem('mc_expanded_charts')
-      if (saved) return new Set(JSON.parse(saved))
-    } catch {}
-    return new Set()
-  })
   const [chartData, setChartData] = useState<Record<string, any>>({})
   const [playerSessions, setPlayerSessions] = useState<Record<string, PlayerSession[]>>({})
   const dataLoadedRef = useRef(false)
 
   useEffect(() => { fetchInstances() }, [])
 
-  // 记住展开状态到 localStorage
-  useEffect(() => {
-    localStorage.setItem('mc_expanded_charts', JSON.stringify([...expandedCharts]))
-  }, [expandedCharts])
-
-  // 逐个恢复之前展开的图表数据（后台加载，不阻塞页面渲染）
+  // 加载所有实例的图表数据（每个实例都默认显示历史在线人数）
   useEffect(() => {
     if (instances.length === 0 || dataLoadedRef.current) return
     dataLoadedRef.current = true
-    const loadExpanded = async () => {
-      for (const id of expandedCharts) {
-        if (chartData[id] && playerSessions[id]?.length !== undefined) continue
+    const loadAllData = async () => {
+      for (const inst of instances) {
         const [chartRes, sessionRes] = await Promise.all([
-          apiClient.get(`/instances/${id}/player-stats`),
-          apiClient.getInstancePlayerSessions(id)
+          apiClient.get(`/instances/${inst.id}/player-stats`),
+          apiClient.getInstancePlayerSessions(inst.id)
         ])
         if (chartRes.success && chartRes.data) {
-          setChartData(prev => (prev[id] ? prev : { ...prev, [id]: chartRes.data }))
+          setChartData(prev => (prev[inst.id] ? prev : { ...prev, [inst.id]: chartRes.data }))
         }
         if (sessionRes.success && sessionRes.data) {
-          setPlayerSessions(prev => (prev[id] ? prev : { ...prev, [id]: sessionRes.data as PlayerSession[] }))
+          setPlayerSessions(prev => (prev[inst.id] ? prev : { ...prev, [inst.id]: sessionRes.data as PlayerSession[] }))
         }
       }
     }
-    loadExpanded()
+    loadAllData()
   }, [instances])
 
   // 通过 WebSocket 实时接收玩家会话更新
@@ -86,28 +73,6 @@ export default function InstancesPage() {
     socketClient.on('player-sessions-update', handler)
     return () => { socketClient.off('player-sessions-update', handler) }
   }, [])
-
-  const toggleChart = async (id: string) => {
-    const next = new Set(expandedCharts)
-    if (next.has(id)) {
-      next.delete(id)
-    } else {
-      next.add(id)
-      if (!chartData[id]) {
-        const res = await apiClient.get(`/instances/${id}/player-stats`)
-        if (res.success && res.data) {
-          setChartData(prev => ({ ...prev, [id]: res.data }))
-        }
-      }
-      if (!playerSessions[id]) {
-        const res = await apiClient.getInstancePlayerSessions(id)
-        if (res.success && res.data) {
-          setPlayerSessions(prev => ({ ...prev, [id]: res.data as PlayerSession[] }))
-        }
-      }
-    }
-    setExpandedCharts(next)
-  }
 
   const getPlayerTotalDuration = (sessions: PlayerSession[]) => {
     let total = 0
@@ -217,7 +182,6 @@ export default function InstancesPage() {
       ) : (
         <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
           {instances.map(inst => {
-            const showChart = expandedCharts.has(inst.id)
             const data = chartData[inst.id]
             return (
               <motion.div key={inst.id} layout initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
@@ -237,11 +201,6 @@ export default function InstancesPage() {
                     )}
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
-                    <button onClick={() => toggleChart(inst.id)}
-                      className={`p-2 rounded-lg transition-colors ${showChart ? 'text-primary-600 bg-primary-50' : 'text-gray-400 hover:bg-surface-50'}`}
-                      title="历史在线人数">
-                      <BarChart3 className="w-4 h-4" />
-                    </button>
                     {inst.status === 'running' ? (
                       <button onClick={() => handleStop(inst.id)} disabled={actionLoading === inst.id} className="p-2 rounded-lg text-yellow-600 hover:bg-yellow-50 transition-colors" title="停止"><Square className="w-4 h-4" /></button>
                     ) : (
@@ -253,69 +212,62 @@ export default function InstancesPage() {
                     <button onClick={() => setDeleteTarget(inst.id)} className="p-2 rounded-lg text-red-400 hover:bg-red-50 transition-colors" title="删除"><Trash2 className="w-4 h-4" /></button>
                   </div>
                 </div>
-                {/* 展开的折线图区域（左侧图表 + 右侧在线玩家） */}
-                <AnimatePresence>
-                  {showChart && (
-                    <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }}
-                      exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
-                      <div className="px-5 pb-4 pt-0 border-t border-surface-100">
-                        <div className="pt-3 flex gap-4">
-                          {/* 左侧：历史在线人数图表 */}
-                          <div className="flex-1 min-w-0">
-                            <h4 className="text-xs font-medium text-gray-500 mb-2">历史在线人数</h4>
-                            {data ? (
-                              <PlayerChart data={data} width={400} height={140} playerSessions={playerSessions[inst.id]} />
-                            ) : (
-                              <div className="text-xs text-gray-400 py-6 text-center">加载中...</div>
-                            )}
-                          </div>
-                          {/* 右侧：所有玩家及游玩时长 */}
-                          <div className="w-44 shrink-0 border-l border-surface-100 pl-4">
-                            <h4 className="text-xs font-medium text-gray-500 mb-2 flex items-center gap-1">
-                              <Users className="w-3 h-3" />玩家
-                            </h4>
-                            {playerSessions[inst.id] && playerSessions[inst.id].length > 0 ? (
-                              <div className="space-y-2 max-h-60 overflow-y-auto">
-                                {(() => {
-                                  // 按 playerId 聚合所有会话，计算累计总时长
-                                  const grouped: Record<string, PlayerSession[]> = {}
-                                  for (const s of playerSessions[inst.id]) {
-                                    if (!grouped[s.playerId]) grouped[s.playerId] = []
-                                    grouped[s.playerId].push(s)
-                                  }
-                                  // 按总在线时长从高到低排序
-                                  const sorted = Object.entries(grouped).sort(([, aSessions], [, bSessions]) => {
-                                    const aMs = getPlayerTotalDuration(aSessions)
-                                    const bMs = getPlayerTotalDuration(bSessions)
-                                    return bMs - aMs
-                                  })
-                                  return sorted.map(([playerId, sessions]) => {
-                                    const isOnline = sessions.some(s => s.active)
-                                    const totalMs = getPlayerTotalDuration(sessions)
-                                    const playerName = sessions[0].playerName
-                                    return (
-                                      <div key={playerId} className="flex items-center justify-between text-xs">
-                                        <span className={`flex items-center gap-1.5 truncate ${isOnline ? 'text-gray-700' : 'text-gray-400'}`}>
-                                          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isOnline ? 'bg-green-500' : 'bg-gray-300'}`} />
-                                          <span className={`truncate ${isOnline ? 'text-green-700' : 'text-gray-400'}`}>{playerName}</span>
-                                        </span>
-                                        <span className="text-gray-400 shrink-0 ml-2">{formatDuration(totalMs)}</span>
-                                      </div>
-                                    )
-                                  })
-                                })()}
-                              </div>
-                            ) : (
-                              <div className="flex items-center justify-center py-8 text-gray-300">
-                                <Users className="w-5 h-5" />
-                              </div>
-                            )}
-                          </div>
+                {/* 折线图区域（左侧图表 + 右侧在线玩家） */}
+                <div className="border-t border-surface-100">
+                  <div className="px-5 pb-4 pt-3 flex gap-4">
+                    {/* 左侧：历史在线人数图表 */}
+                    <div className="flex-1 min-w-0">
+                      <h4 className="text-xs font-medium text-gray-500 mb-2">历史在线人数</h4>
+                      {data ? (
+                        <PlayerChart data={data} width={400} height={140} playerSessions={playerSessions[inst.id]} />
+                      ) : (
+                        <div className="text-xs text-gray-400 py-6 text-center">加载中...</div>
+                      )}
+                    </div>
+                    {/* 右侧：所有玩家及游玩时长 */}
+                    <div className="w-44 shrink-0 border-l border-surface-100 pl-4">
+                      <h4 className="text-xs font-medium text-gray-500 mb-2 flex items-center gap-1">
+                        <Users className="w-3 h-3" />玩家
+                      </h4>
+                      {playerSessions[inst.id] && playerSessions[inst.id].length > 0 ? (
+                        <div className="space-y-2 max-h-60 overflow-y-auto">
+                          {(() => {
+                            // 按 playerId 聚合所有会话，计算累计总时长
+                            const grouped: Record<string, PlayerSession[]> = {}
+                            for (const s of playerSessions[inst.id]) {
+                              if (!grouped[s.playerId]) grouped[s.playerId] = []
+                              grouped[s.playerId].push(s)
+                            }
+                            // 按总在线时长从高到低排序
+                            const sorted = Object.entries(grouped).sort(([, aSessions], [, bSessions]) => {
+                              const aMs = getPlayerTotalDuration(aSessions)
+                              const bMs = getPlayerTotalDuration(bSessions)
+                              return bMs - aMs
+                            })
+                            return sorted.map(([playerId, sessions]) => {
+                              const isOnline = sessions.some(s => s.active)
+                              const totalMs = getPlayerTotalDuration(sessions)
+                              const playerName = sessions[0].playerName
+                              return (
+                                <div key={playerId} className="flex items-center justify-between text-xs">
+                                  <span className={`flex items-center gap-1.5 truncate ${isOnline ? 'text-gray-700' : 'text-gray-400'}`}>
+                                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isOnline ? 'bg-green-500' : 'bg-gray-300'}`} />
+                                    <span className={`truncate ${isOnline ? 'text-green-700' : 'text-gray-400'}`}>{playerName}</span>
+                                  </span>
+                                  <span className="text-gray-400 shrink-0 ml-2">{formatDuration(totalMs)}</span>
+                                </div>
+                              )
+                            })
+                          })()}
                         </div>
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
+                      ) : (
+                        <div className="flex items-center justify-center py-8 text-gray-300">
+                          <Users className="w-5 h-5" />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
               </motion.div>
             )
           })}
