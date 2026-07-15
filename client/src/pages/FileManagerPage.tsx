@@ -26,7 +26,6 @@ export default function FileManagerPage() {
   const { addNotification } = useNotificationStore()
   const { addItem, updateItem, removeItem } = useProgressStore()
   const [editFile, setEditFile] = useState<{ path: string; content: string; name: string } | null>(null)
-  const [deleteTarget, setDeleteTarget] = useState<{ path: string; name: string } | null>(null)
   const [showNewFile, setShowNewFile] = useState(false)
   const [showNewDir, setShowNewDir] = useState(false)
   const [newName, setNewName] = useState('')
@@ -191,22 +190,6 @@ export default function FileManagerPage() {
     const res = await apiClient.saveFile(editFile.path, editFile.content)
     if (res.success) { addNotification({ type: 'success', title: '保存成功' }); setEditFile(null) }
     else addNotification({ type: 'error', title: '保存失败' })
-  }
-
-  const handleDelete = async () => {
-    if (!deleteTarget) return
-    const opId = genOpId()
-    const socketId = socketClient.getSocketId() || undefined
-    addItem({ id: opId, type: 'delete', label: `删除: ${deleteTarget.name}`, progress: 0, status: 'active' })
-
-    const res = await apiClient.deleteFile(deleteTarget.path, opId, socketId)
-    if (res.success) {
-      addNotification({ type: 'info', title: '正在删除...' })
-    } else {
-      updateItem(opId, { status: 'error', label: '删除失败', error: res.message })
-      addNotification({ type: 'error', title: '删除失败' })
-    }
-    setDeleteTarget(null)
   }
 
   const handleCreateFile = async () => {
@@ -555,24 +538,29 @@ export default function FileManagerPage() {
       </div>
 
       {selectedPaths.size > 0 && (
-        <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-white rounded-xl shadow-lg border border-surface-200 px-4 py-3 flex items-center gap-4">
-          <span className="text-sm text-gray-600">已选 {selectedPaths.size} 项</span>
-          <div className="w-px h-5 bg-surface-200" />
-          <button onClick={() => handleCopyToClipboard('copy')} className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-600 hover:bg-surface-100 rounded-lg transition-colors"><Copy className="w-4 h-4" />复制到剪贴板</button>
-          <button onClick={() => handleCopyToClipboard('cut')} className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-600 hover:bg-surface-100 rounded-lg transition-colors"><Scissors className="w-4 h-4" />剪切</button>
-          <button onClick={handleBatchCompress} className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-600 hover:bg-surface-100 rounded-lg transition-colors"><FileArchive className="w-4 h-4" />压缩</button>
-          <button onClick={() => handleOpenPermission()} className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-600 hover:bg-surface-100 rounded-lg transition-colors"><Shield className="w-4 h-4" />权限</button>
-          <button onClick={() => setBatchDelete(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors"><Trash2 className="w-4 h-4" />删除</button>
-          <button onClick={() => setSelectedPaths(new Set())} className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-400 hover:text-gray-600 hover:bg-surface-100 rounded-lg transition-colors">取消</button>
+        <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="fixed bottom-4 sm:bottom-6 inset-x-4 mx-auto z-40 w-fit max-w-[calc(100vw-2rem)] max-h-[calc(100vh-2rem)] overflow-y-auto bg-white rounded-xl shadow-lg border border-surface-200 px-3 sm:px-4 py-3">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
+            <span className="text-sm text-gray-600 shrink-0">已选 {selectedPaths.size} 项</span>
+            <div className="hidden sm:block w-px h-5 bg-surface-200 shrink-0" />
+            <div className="flex flex-wrap items-center gap-1 sm:gap-2">
+              <button onClick={() => handleOpenPermission()} className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-600 hover:bg-surface-100 rounded-lg transition-colors"><Shield className="w-4 h-4" />权限</button>
+              <button onClick={() => setBatchDelete(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors"><Trash2 className="w-4 h-4" />删除</button>
+              <button onClick={() => setSelectedPaths(new Set())} className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-400 hover:text-gray-600 hover:bg-surface-100 rounded-lg transition-colors">取消</button>
+            </div>
+          </div>
         </motion.div>
       )}
 
       {clipboard && selectedPaths.size === 0 && (
-        <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-white rounded-xl shadow-lg border border-primary-200 px-4 py-3 flex items-center gap-4">
-          <span className="text-sm text-gray-600">剪贴板: {clipboard.paths.length} 项 (已{clipboard.action === 'copy' ? '复制' : '剪切'})</span>
-          <div className="w-px h-5 bg-surface-200" />
-          <button onClick={handlePaste} className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-primary-600 hover:bg-primary-50 rounded-lg transition-colors"><Copy className="w-4 h-4" />粘贴到此处</button>
-          <button onClick={() => setClipboard(null)} className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-400 hover:text-gray-600 hover:bg-surface-100 rounded-lg transition-colors">清除</button>
+        <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="fixed bottom-4 sm:bottom-6 inset-x-4 mx-auto z-40 w-fit max-w-[calc(100vw-2rem)] max-h-[calc(100vh-2rem)] overflow-y-auto bg-white rounded-xl shadow-lg border border-primary-200 px-3 sm:px-4 py-3">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
+            <span className="text-sm text-gray-600 shrink-0">剪贴板: {clipboard.paths.length} 项 (已{clipboard.action === 'copy' ? '复制' : '剪切'})</span>
+            <div className="hidden sm:block w-px h-5 bg-surface-200 shrink-0" />
+            <div className="flex flex-wrap items-center gap-1 sm:gap-2">
+              <button onClick={handlePaste} className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-primary-600 hover:bg-primary-50 rounded-lg transition-colors"><Copy className="w-4 h-4" />粘贴到此处</button>
+              <button onClick={() => setClipboard(null)} className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-400 hover:text-gray-600 hover:bg-surface-100 rounded-lg transition-colors">清除</button>
+            </div>
+          </div>
         </motion.div>
       )}
 
@@ -622,8 +610,6 @@ export default function FileManagerPage() {
         onClose={() => setShowUploadModal(false)}
         onUpload={handleUploadFiles}
       />
-
-      <ConfirmDeleteDialog isOpen={!!deleteTarget} onClose={() => setDeleteTarget(null)} onConfirm={handleDelete} name={deleteTarget?.name || ''} type="文件" />
 
       <ConfirmDeleteDialog isOpen={batchDelete} onClose={() => setBatchDelete(false)} onConfirm={handleBatchDelete} name={`${selectedPaths.size} 项`} type="文件" />
 
@@ -682,9 +668,6 @@ export default function FileManagerPage() {
             <button onClick={() => { setCompressExtract({ path: contextMenu.file.path, name: contextMenu.file.name, mode: 'extract', destPath: currentPath }); setContextMenu(null) }}
               className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-surface-50"><FileArchive className="w-4 h-4" />解压</button>
           )}
-          <div className="border-t border-surface-100 my-1" />
-          <button onClick={() => { setDeleteTarget({ path: contextMenu.file.path, name: contextMenu.file.name }); setContextMenu(null) }}
-            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50"><Trash2 className="w-4 h-4" />删除</button>
         </motion.div>
       )}
       </AnimatePresence>

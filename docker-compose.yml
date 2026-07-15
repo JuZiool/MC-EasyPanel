@@ -9,8 +9,6 @@ services:
     volumes:
       - ./data:/app/server/data           # 面板数据（实例配置、用户信息等）
       - ./servers:/app/servers            # 服务器文件挂载入口
-    command: >
-      sh -c "chmod -R 777 /app/server/data && exec dumb-init node server/dist/index.js"
     restart: always                         # 自动重启
     environment:
       - TZ=Asia/Shanghai                  # 时区
@@ -18,4 +16,3 @@ services:
       - PORT=3001                         # 面板监听端口
       - JWT_SECRET=${JWT_SECRET}  # JWT 签名密钥（必填！通过 .env 文件设置，不可使用默认值）
       # 内存限制已移除
-

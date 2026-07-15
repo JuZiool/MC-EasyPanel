@@ -17,6 +17,7 @@ import filesRouter from './routes/files.js'
 import { PlayerStatsRecorder } from './utils/playerStatsRecorder.js'
 import { PlayerSessionTracker } from './utils/playerSessionTracker.js'
 import { queryInstancePlayers, queryMultipleInstancePlayers } from './utils/mcQuery.js'
+import { getProcessTreeMemory, killProcessTree } from './utils/processTreeMemory.js'
 
 dotenv.config()
 
@@ -148,6 +149,7 @@ instanceManager.on('terminal-create', async ({ id, command, cwd, sessionId }) =>
       { name: 'xterm-color', cols: 80, rows: 24, cwd: cwd || process.cwd(), env: process.env as any }
     )
     activeTerminals.set(sessionId, ptyProcess)
+    instanceManager.setInstanceRunning(id, ptyProcess.pid)
     const onDataDisposable = ptyProcess.onData((data: string) => {
       logBuffer.append(sessionId, data, id)
       queueTerminalOutput(sessionId, data)
@@ -183,10 +185,14 @@ instanceManager.on('instance-input', ({ id, data }) => {
 })
 
 instanceManager.on('instance-force-stop', ({ id }) => {
-  const inst = instanceManager.getInstance(id)
-  if (inst && inst.terminalSessionId) {
-    const pty = activeTerminals.get(inst.terminalSessionId)
-    if (pty) { pty.kill(); activeTerminals.delete(inst.terminalSessionId) }
+    const inst = instanceManager.getInstance(id)
+    if (inst && inst.terminalSessionId) {
+      const pty = activeTerminals.get(inst.terminalSessionId)
+      if (inst.pid) killProcessTree(inst.pid)
+      if (pty) {
+        try { pty.kill() } catch {}
+        activeTerminals.delete(inst.terminalSessionId)
+      }
     logBuffer.clear(inst.terminalSessionId)
   }
   instanceManager.setInstanceStopped(id)
@@ -269,6 +275,7 @@ io.on('connection', (socket) => {
   socket.on('close-pty', ({ sessionId }) => {
     const pty = activeTerminals.get(sessionId)
     if (pty) {
+      killProcessTree(pty.pid)
       try { pty.kill() } catch {}
       activeTerminals.delete(sessionId)
       logBuffer.clear(sessionId)
@@ -291,6 +298,7 @@ io.on('connection', (socket) => {
       for (const sid of sessions) {
         const pty = activeTerminals.get(sid)
         if (pty) {
+          killProcessTree(pty.pid)
           try { pty.kill() } catch {}
           activeTerminals.delete(sid)
           logBuffer.clear(sid)
@@ -300,6 +308,19 @@ io.on('connection', (socket) => {
     }
   })
 })
+
+function broadcastInstanceMemory() {
+  const memoryByInstance: Record<string, number> = {}
+  for (const instance of instanceManager.getInstances()) {
+    memoryByInstance[instance.id] = instance.status === 'running' && instance.pid
+      ? getProcessTreeMemory(instance.pid)
+      : 0
+  }
+  io.emit('instance-memory', memoryByInstance)
+}
+
+const instanceMemoryTimer = setInterval(broadcastInstanceMemory, 3000)
+broadcastInstanceMemory()
 
 // SPA 支持
 app.get('*', (_req, res) => {
@@ -321,12 +342,14 @@ function gracefulShutdown(signal: string) {
   // 停止定时器
   playerStatsRecorder.stop()
   playerSessionTracker.stop()
+  clearInterval(instanceMemoryTimer)
 
   // 停止日志缓冲区自动清理
   logBuffer.stopAutoCleanup()
 
   // 清理所有 PTY 终端
   for (const [sessionId, pty] of activeTerminals) {
+    killProcessTree(pty.pid)
     try { pty.kill() } catch {}
     activeTerminals.delete(sessionId)
     logBuffer.clear(sessionId)

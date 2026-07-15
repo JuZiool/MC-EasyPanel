@@ -71,10 +71,10 @@ export function setupInstanceRoutes(instanceManager: any, playerStatsRecorder?: 
     res.json({ success: true, data: inst })
   })
 
-  router.delete('/:id', (req: AuthenticatedRequest, res) => {
+  router.delete('/:id', async (req: AuthenticatedRequest, res) => {
     const removeFiles = req.query.removeFiles === '1'
-    const result = instanceManager.deleteInstance(req.params.id, removeFiles)
-    if (!result) return res.status(404).json({ success: false, message: '实例不存在' })
+    const result = await instanceManager.deleteInstance(req.params.id, removeFiles)
+    if (!result) return res.status(400).json({ success: false, message: '实例不存在或无法安全停止' })
     res.json({ success: true, message: removeFiles ? '已删除（含文件）' : '已删除' })
   })
 

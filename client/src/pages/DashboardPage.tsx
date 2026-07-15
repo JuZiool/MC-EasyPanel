@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { useInstanceStore } from '../stores/instanceStore'
 import { useNotificationStore } from '../stores/notificationStore'
 import apiClient from '../utils/api'
+import socketClient from '../utils/socket'
 import { Play, Square, Terminal, FileText, Server, Power, PowerOff, Users } from 'lucide-react'
 import type { ServerPlayerInfo, Instance } from '../types'
 
@@ -12,6 +13,7 @@ export default function DashboardPage() {
   const { addNotification } = useNotificationStore()
   const navigate = useNavigate()
   const [playerData, setPlayerData] = useState<Record<string, ServerPlayerInfo>>({})
+  const [instanceMemory, setInstanceMemory] = useState<Record<string, number>>({})
 
   useEffect(() => {
     fetchInstances()
@@ -28,6 +30,12 @@ export default function DashboardPage() {
     fetchPlayers()
     const interval = setInterval(fetchPlayers, 10000)
     return () => clearInterval(interval)
+  }, [])
+
+  useEffect(() => {
+    const handleInstanceMemory = (data: Record<string, number>) => setInstanceMemory(data)
+    socketClient.on('instance-memory', handleInstanceMemory)
+    return () => socketClient.off('instance-memory', handleInstanceMemory)
   }, [])
 
   const handleStart = async (id: string) => {
@@ -69,6 +77,12 @@ export default function DashboardPage() {
     if (!iso) return '-'
     const d = new Date(iso)
     return d.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+  }
+
+  const formatMemory = (bytes?: number) => {
+    if (!bytes || bytes <= 0) return '-'
+    if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(2)} GB`
+    return `${Math.round(bytes / 1024 ** 2)} MB`
   }
 
   /** 实时总计运行时长：运行中 = 历史累计 + 本次已运行，已停止 = 历史累计 */
@@ -132,10 +146,15 @@ export default function DashboardPage() {
             {instances.map(inst => (
               <motion.div key={inst.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }}
                 className="flex items-start justify-between py-2.5 border-b border-surface-100 last:border-0">
-                <div className="flex items-start gap-2.5 min-w-0 flex-1">
-                  <span className={`w-2.5 h-2.5 rounded-full shrink-0 mt-0.5 ${inst.status === 'running' ? 'bg-green-500' : inst.status === 'starting' ? 'bg-yellow-400 animate-pulse' : 'bg-gray-300'}`} />
+                <div className="flex items-stretch gap-2.5 min-w-0 flex-1">
+                  <span className="flex items-center shrink-0">
+                    <span className={`w-2.5 h-2.5 rounded-full ${inst.status === 'running' ? 'bg-green-500' : inst.status === 'starting' ? 'bg-yellow-400 animate-pulse' : 'bg-gray-300'}`} />
+                  </span>
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm text-gray-700 truncate font-medium">{inst.name}</p>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <p className="text-sm text-gray-700 truncate font-medium">{inst.name}</p>
+                      <span className="text-xs text-gray-400 font-mono shrink-0">内存 {formatMemory(instanceMemory[inst.id])}</span>
+                    </div>
                     <div className="text-xs text-gray-400 mt-1 space-y-0.5">
                       <p className="truncate">
                         <span className="text-gray-500">创建</span> {formatDateTime(inst.createdAt)}

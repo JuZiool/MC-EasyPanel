@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express'
 import os from 'os'
+import { execFileSync } from 'child_process'
 import { authenticateToken } from '../middleware/auth.js'
 const router = Router()
 router.use(authenticateToken)
@@ -18,16 +19,15 @@ router.get('/stats', (_req: Request, res: Response) => {
 
   let diskTotal = 0, diskFree = 0
   try {
-    const { execSync } = require('child_process')
     if (process.platform === 'win32') {
-      const output = execSync('wmic logicaldisk where DriveType=3 get Size,FreeSpace').toString()
+      const output = execFileSync('wmic', ['logicaldisk', 'where', 'DriveType=3', 'get', 'Size,FreeSpace']).toString()
       const lines = output.trim().split('\n').slice(1)
       lines.forEach((line: string) => {
         const [free, total] = line.trim().split(/\s+/).map(Number)
         if (!isNaN(free) && !isNaN(total)) { diskTotal += total; diskFree += free }
       })
     } else {
-      const output = execSync('df -B1 --total 2>/dev/null || df -k /').toString()
+      const output = execFileSync('df', ['-B1', '/']).toString()
       const lastLine = output.trim().split('\n').pop() || ''
       const parts = lastLine.split(/\s+/)
       diskTotal = parseInt(parts[1]) || 0

@@ -38,23 +38,25 @@ export function isNotSystemPath(resolved: string): boolean {
 }
 
 export function isValidPath(p: string): boolean {
+  if (typeof p !== 'string' || !path.isAbsolute(p)) return false
+  const resolved = path.resolve(p)
+  if (p.split('\\').join('/').split('/').includes('..') || !isNotSystemPath(resolved)) return false
+
+  let existingAncestor = resolved
+  while (!fs.existsSync(existingAncestor)) {
+    const parent = path.dirname(existingAncestor)
+    if (parent === existingAncestor) return false
+    existingAncestor = parent
+  }
+
   try {
-    const real = fs.realpathSync.native(p)
-    if (!path.isAbsolute(p) || p.includes('..')) return false
-    if (path.relative(p, real).startsWith('..')) return false
-    return isWithinAllowedRoots(real) && isNotSystemPath(real)
+    const realAncestor = fs.realpathSync.native(existingAncestor)
+    if (!isWithinAllowedRoots(realAncestor) || !isNotSystemPath(realAncestor)) return false
+    const remainingPath = path.relative(existingAncestor, resolved)
+    const effectiveTarget = path.resolve(realAncestor, remainingPath)
+    return isWithinAllowedRoots(effectiveTarget) && isNotSystemPath(effectiveTarget)
   } catch {
-    if (!path.isAbsolute(p) || p.includes('..')) return false
-    const resolved = path.resolve(p)
-    if (!isNotSystemPath(resolved)) return false
-    const parentDir = path.dirname(p)
-    try {
-      const realParent = fs.realpathSync.native(parentDir)
-      if (path.relative(parentDir, realParent).startsWith('..')) return false
-      return isWithinAllowedRoots(realParent)
-    } catch {
-      return isWithinAllowedRoots(resolved)
-    }
+    return false
   }
 }
 

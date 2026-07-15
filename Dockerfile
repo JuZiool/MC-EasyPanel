@@ -15,12 +15,14 @@ FROM node:20-bullseye-slim AS runtime
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y dumb-init --no-install-recommends && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y dumb-init gosu --no-install-recommends && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/server/dist ./server/dist
 COPY --from=builder /app/server/node_modules ./server/node_modules
 COPY --from=builder /app/server/package.json ./server/package.json
 COPY --from=builder /app/client/dist ./client/dist
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod 755 /usr/local/bin/docker-entrypoint.sh
 
 ENV NODE_ENV=production
 ENV PORT=3001
@@ -29,4 +31,5 @@ EXPOSE 3001
 
 VOLUME [ "/app/server/data" ]
 
+ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["dumb-init", "node", "server/dist/index.js"]

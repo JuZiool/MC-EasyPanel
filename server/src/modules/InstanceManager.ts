@@ -3,6 +3,7 @@ import fs from 'fs'
 import path from 'path'
 import { v4 as uuidv4 } from 'uuid'
 import logger from '../utils/logger.js'
+import { isValidPath } from '../routes/fileUtils.js'
 
 export interface Instance {
   id: string
@@ -127,19 +128,39 @@ class InstanceManager extends EventEmitter {
   updateInstance(id: string, data: Partial<Instance>): Instance | null {
     const inst = this.instances.get(id)
     if (!inst) return null
-    Object.assign(inst, data)
+    const editableFields: (keyof Instance)[] = [
+      'name', 'description', 'workingDirectory', 'startCommand',
+      'autoStart', 'stopCommand', 'instanceType', 'javaVersion'
+    ]
+    for (const field of editableFields) {
+      if (data[field] !== undefined) (inst as any)[field] = data[field]
+    }
     this.saveInstances()
     this.emit('instance-updated', inst)
     return inst
   }
 
-  deleteInstance(id: string, removeFiles?: boolean): boolean {
+  async deleteInstance(id: string, removeFiles?: boolean): Promise<boolean> {
     const inst = this.instances.get(id)
     if (!inst) return false
-    if (inst.status === 'running') this.stopInstance(id)
+    if (['running', 'starting', 'stopping'].includes(inst.status)) {
+      this.emit('instance-force-stop', { id })
+      const deadline = Date.now() + 5000
+      while (Date.now() < deadline && this.instances.get(id)?.status !== 'stopped') {
+        await new Promise(resolve => setTimeout(resolve, 100))
+      }
+      if (this.instances.get(id)?.status !== 'stopped') {
+        logger.error(`删除实例失败，无法停止实例进程: ${id}`)
+        return false
+      }
+    }
     // 可选删除工作目录
     if (removeFiles && inst.workingDirectory) {
       try {
+        if (!isValidPath(inst.workingDirectory)) {
+          logger.error(`拒绝删除无效的实例工作目录: ${inst.workingDirectory}`)
+          return false
+        }
         if (fs.existsSync(inst.workingDirectory)) {
           fs.rmSync(inst.workingDirectory, { recursive: true, force: true })
         }
@@ -177,11 +198,19 @@ class InstanceManager extends EventEmitter {
       } else {
         const jarFile = await this.detectJarFile(inst.workingDirectory)
         if (jarFile) command = `java -Xmx2G -Xms1G -jar ${jarFile} nogui`
-        else return { success: false, error: '未找到启动脚本或 server.jar 文件' }
+        else {
+          inst.status = 'error'
+          this.emit('instance-status-changed', { id, status: 'error' })
+          return { success: false, error: '未找到启动脚本或 server.jar 文件' }
+        }
       }
     }
 
-    if (!command) return { success: false, error: '启动命令为空' }
+    if (!command) {
+      inst.status = 'error'
+      this.emit('instance-status-changed', { id, status: 'error' })
+      return { success: false, error: '启动命令为空' }
+    }
 
     const terminalSessionId = `instance-${id}-${Date.now()}`
     inst.startCommand = command
@@ -227,8 +256,9 @@ class InstanceManager extends EventEmitter {
   setInstanceStopped(id: string, keepSession: boolean = true) {
     const inst = this.instances.get(id)
     if (!inst) return
+    if (inst.status === 'stopped') return
     // 累计本次运行时长
-    if (inst.lastStarted) {
+    if (inst.lastStarted && ['running', 'starting', 'stopping'].includes(inst.status)) {
       const duration = Date.now() - new Date(inst.lastStarted).getTime()
       inst.totalRunDuration = (inst.totalRunDuration || 0) + duration
     }
