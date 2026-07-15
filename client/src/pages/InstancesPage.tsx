@@ -28,6 +28,7 @@ export default function InstancesPage() {
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [chartData, setChartData] = useState<Record<string, any>>({})
   const [trackingData, setTrackingData] = useState<Record<string, PlayerTrackingData>>({})
+  const [instanceMemory, setInstanceMemory] = useState<Record<string, number>>({})
   const [chartLoadStatus, setChartLoadStatus] = useState<Record<string, DataLoadStatus>>({})
   const [trackingLoadStatus, setTrackingLoadStatus] = useState<Record<string, DataLoadStatus>>({})
   const loadedChartIdsRef = useRef(new Set<string>())
@@ -120,6 +121,12 @@ export default function InstancesPage() {
     return () => { socketClient.off('player-sessions-update', handler) }
   }, [])
 
+  useEffect(() => {
+    const handler = (data: Record<string, number>) => setInstanceMemory(data)
+    socketClient.on('instance-memory', handler)
+    return () => { socketClient.off('instance-memory', handler) }
+  }, [])
+
   const formatDuration = (ms: number) => {
     const h = Math.floor(ms / 3600000)
     const m = Math.floor((ms % 3600000) / 60000)
@@ -131,6 +138,12 @@ export default function InstancesPage() {
   const getPlayerDisplayDuration = (player: PlayerTrackingData['players'][number]) => {
     if (!player.active || !player.currentSessionStartedAt) return player.totalDurationMs
     return player.totalDurationMs + Math.max(0, Date.now() - new Date(player.currentSessionStartedAt).getTime())
+  }
+
+  const formatMemory = (bytes?: number) => {
+    if (!bytes || bytes <= 0) return '-'
+    if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(2)} GB`
+    return `${Math.round(bytes / 1024 ** 2)} MB`
   }
 
   const openCreate = () => { setShowCreate(true); setTimeout(() => setCreateAnimating(true), 10) }
@@ -232,9 +245,12 @@ export default function InstancesPage() {
                 className="bg-white rounded-xl border border-surface-200">
                 {/* 实例信息行 */}
                 <div className="p-5 flex items-center gap-4">
-                  <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${statusColors[inst.status]}`} />
                   <div className="flex-1 min-w-0">
-                    <h3 className="font-medium text-gray-800">{inst.name}</h3>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <h3 className="font-medium text-gray-800 truncate">{inst.name}</h3>
+                      <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${statusColors[inst.status]}`} />
+                      <span className="text-xs text-gray-400 font-mono shrink-0">内存 {formatMemory(instanceMemory[inst.id])}</span>
+                    </div>
                     <p className="text-xs text-gray-400 mt-0.5 truncate">{inst.workingDirectory || inst.description || '未设置目录'}</p>
                     <span className="inline-block text-xs text-gray-400 mt-1 capitalize">{inst.status}</span>
                     {inst.status === 'running' && hasReliablePlayerList && playerData.players.some(player => player.active) && (
