@@ -146,13 +146,11 @@ export default function DashboardPage() {
             {instances.map(inst => (
               <motion.div key={inst.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }}
                 className="flex items-start justify-between py-2.5 border-b border-surface-100 last:border-0">
-                <div className="flex items-stretch gap-2.5 min-w-0 flex-1">
-                  <span className="flex items-center shrink-0">
-                    <span className={`w-2.5 h-2.5 rounded-full ${inst.status === 'running' ? 'bg-green-500' : inst.status === 'starting' ? 'bg-yellow-400 animate-pulse' : 'bg-gray-300'}`} />
-                  </span>
+                <div className="flex items-stretch min-w-0 flex-1">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 min-w-0">
                       <p className="text-sm text-gray-700 truncate font-medium">{inst.name}</p>
+                      <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${inst.status === 'running' ? 'bg-green-500' : inst.status === 'starting' ? 'bg-yellow-400 animate-pulse' : 'bg-gray-300'}`} />
                       <span className="text-xs text-gray-400 font-mono shrink-0">内存 {formatMemory(instanceMemory[inst.id])}</span>
                     </div>
                     <div className="text-xs text-gray-400 mt-1 space-y-0.5">
