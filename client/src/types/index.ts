@@ -94,6 +94,22 @@ export interface PlayerSession {
   active: boolean
 }
 
+export interface PlayerTotal {
+  playerName: string
+  playerId: string
+  instanceId: string
+  totalDurationMs: number
+  lastSeen: string
+  active: boolean
+  currentSessionStartedAt?: string
+}
+
+export interface PlayerTrackingData {
+  sessions: PlayerSession[]
+  players: PlayerTotal[]
+  listStatus: 'available' | 'unsupported' | 'unavailable'
+}
+
 export interface Notification {
   id: string
   type: 'success' | 'error' | 'warning' | 'info'

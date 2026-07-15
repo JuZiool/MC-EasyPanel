@@ -52,12 +52,12 @@ export function setupInstanceRoutes(instanceManager: any, playerStatsRecorder?: 
     res.json({ success: true, data: history })
   })
 
-  // 获取实例的所有玩家会话记录（在线 + 历史）
+  // 获取实例永久累计玩家数据及最近七天会话明细
   router.get('/:id/player-sessions', (req: AuthenticatedRequest, res) => {
     const inst = instanceManager.getInstance(req.params.id)
     if (!inst) return res.status(404).json({ success: false, message: '实例不存在' })
-    const sessions = playerSessionTracker ? playerSessionTracker.getAllSessions(req.params.id) : []
-    res.json({ success: true, data: sessions })
+    const data = playerSessionTracker ? playerSessionTracker.getTrackingData(req.params.id) : { sessions: [], players: [], listStatus: 'unavailable' }
+    res.json({ success: true, data })
   })
 
   router.post('/', (req: AuthenticatedRequest, res) => {

@@ -7,9 +7,11 @@ import apiClient from '../utils/api'
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
 import LoadingSpinner from '../components/LoadingSpinner'
 import PlayerChart from '../components/PlayerChart'
-import type { Instance, PlayerSession } from '../types'
+import type { Instance, PlayerTrackingData } from '../types'
 import { Plus, Play, Square, Terminal, Folder, Trash2, Server, Users, Pencil } from 'lucide-react'
 import socketClient from '../utils/socket'
+
+type DataLoadStatus = 'loading' | 'ready' | 'error'
 
 export default function InstancesPage() {
   const { instances, loading, fetchInstances } = useInstanceStore()
@@ -25,63 +27,98 @@ export default function InstancesPage() {
   const [removeFilesOnDelete, setRemoveFilesOnDelete] = useState(false)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [chartData, setChartData] = useState<Record<string, any>>({})
-  const [playerSessions, setPlayerSessions] = useState<Record<string, PlayerSession[]>>({})
-  const dataLoadedRef = useRef(false)
+  const [trackingData, setTrackingData] = useState<Record<string, PlayerTrackingData>>({})
+  const [chartLoadStatus, setChartLoadStatus] = useState<Record<string, DataLoadStatus>>({})
+  const [trackingLoadStatus, setTrackingLoadStatus] = useState<Record<string, DataLoadStatus>>({})
+  const loadedChartIdsRef = useRef(new Set<string>())
+  const loadedTrackingIdsRef = useRef(new Set<string>())
+  const loadingChartIdsRef = useRef(new Set<string>())
+  const loadingTrackingIdsRef = useRef(new Set<string>())
+  const [, setDurationTick] = useState(0)
 
   useEffect(() => { fetchInstances() }, [])
 
-  // 加载所有实例的图表数据（每个实例都默认显示历史在线人数）
   useEffect(() => {
-    if (instances.length === 0 || dataLoadedRef.current) return
-    dataLoadedRef.current = true
-    const loadAllData = async () => {
-      for (const inst of instances) {
-        const [chartRes, sessionRes] = await Promise.all([
-          apiClient.get(`/instances/${inst.id}/player-stats`),
-          apiClient.getInstancePlayerSessions(inst.id)
-        ])
-        if (chartRes.success && chartRes.data) {
-          setChartData(prev => (prev[inst.id] ? prev : { ...prev, [inst.id]: chartRes.data }))
+    const interval = setInterval(() => setDurationTick(tick => tick + 1), 1000)
+    return () => clearInterval(interval)
+  }, [])
+
+  // 并行加载新增实例的数据，失败项每 30 秒重试，历史图表每五分钟刷新一次
+  useEffect(() => {
+    if (instances.length === 0) return
+    const loadData = async (refreshCharts: boolean) => {
+      await Promise.all(instances.map(async inst => {
+        const needsChart = (refreshCharts || !loadedChartIdsRef.current.has(inst.id)) && !loadingChartIdsRef.current.has(inst.id)
+        const needsTracking = !loadedTrackingIdsRef.current.has(inst.id) && !loadingTrackingIdsRef.current.has(inst.id)
+        if (!needsChart && !needsTracking) return
+
+        if (needsChart && !loadedChartIdsRef.current.has(inst.id)) {
+          setChartLoadStatus(prev => ({ ...prev, [inst.id]: 'loading' }))
         }
-        if (sessionRes.success && sessionRes.data) {
-          setPlayerSessions(prev => (prev[inst.id] ? prev : { ...prev, [inst.id]: sessionRes.data as PlayerSession[] }))
+        if (needsTracking && !loadedTrackingIdsRef.current.has(inst.id)) {
+          setTrackingLoadStatus(prev => ({ ...prev, [inst.id]: 'loading' }))
         }
-      }
+        if (needsChart) loadingChartIdsRef.current.add(inst.id)
+        if (needsTracking) loadingTrackingIdsRef.current.add(inst.id)
+
+        try {
+          const [chartRes, trackingRes] = await Promise.all([
+            needsChart ? apiClient.get(`/instances/${inst.id}/player-stats`) : null,
+            needsTracking ? apiClient.getInstancePlayerSessions(inst.id) : null,
+          ])
+
+          if (chartRes) {
+            if (chartRes.success && chartRes.data) {
+              setChartData(prev => ({ ...prev, [inst.id]: chartRes.data }))
+              setChartLoadStatus(prev => ({ ...prev, [inst.id]: 'ready' }))
+              loadedChartIdsRef.current.add(inst.id)
+            } else {
+              setChartLoadStatus(prev => ({ ...prev, [inst.id]: 'error' }))
+              loadedChartIdsRef.current.delete(inst.id)
+            }
+          }
+
+          if (trackingRes) {
+            if (trackingRes.success && trackingRes.data) {
+              setTrackingData(prev => ({ ...prev, [inst.id]: trackingRes.data! }))
+              setTrackingLoadStatus(prev => ({ ...prev, [inst.id]: 'ready' }))
+              loadedTrackingIdsRef.current.add(inst.id)
+            } else {
+              setTrackingLoadStatus(prev => ({ ...prev, [inst.id]: 'error' }))
+              loadedTrackingIdsRef.current.delete(inst.id)
+            }
+          }
+        } finally {
+          if (needsChart) loadingChartIdsRef.current.delete(inst.id)
+          if (needsTracking) loadingTrackingIdsRef.current.delete(inst.id)
+        }
+      }))
     }
-    loadAllData()
+    loadData(false)
+    const retryInterval = setInterval(() => loadData(false), 30 * 1000)
+    const chartInterval = setInterval(() => loadData(true), 5 * 60 * 1000)
+    return () => {
+      clearInterval(retryInterval)
+      clearInterval(chartInterval)
+    }
   }, [instances])
 
   // 通过 WebSocket 实时接收玩家会话更新
   useEffect(() => {
-    const handler = (data: Record<string, PlayerSession[]>) => {
-      setPlayerSessions(prev => {
-        const next = { ...prev }
-        for (const [instanceId, sessions] of Object.entries(data)) {
-          // 合并实时数据：将活跃会话与已有历史会话合并
-          const existing = next[instanceId] || []
-          const activeIds = new Set(sessions.map(s => `${s.playerId}:${s.instanceId}`))
-          // 保留非活跃的历史会话，替换相同 playerId+instanceId 的活跃会话
-          const merged = [
-            ...existing.filter(s => !s.active || !activeIds.has(`${s.playerId}:${s.instanceId}`)),
-            ...sessions
-          ]
-          next[instanceId] = merged
-        }
-        return next
-      })
+    const handler = (data: Record<string, PlayerTrackingData>) => {
+      setTrackingData(prev => ({ ...prev, ...data }))
+      const instanceIds = Object.keys(data)
+      if (instanceIds.length > 0) {
+        for (const instanceId of instanceIds) loadedTrackingIdsRef.current.add(instanceId)
+        setTrackingLoadStatus(prev => ({
+          ...prev,
+          ...Object.fromEntries(instanceIds.map(instanceId => [instanceId, 'ready' as const])),
+        }))
+      }
     }
     socketClient.on('player-sessions-update', handler)
     return () => { socketClient.off('player-sessions-update', handler) }
   }, [])
-
-  const getPlayerTotalDuration = (sessions: PlayerSession[]) => {
-    let total = 0
-    for (const s of sessions) {
-      const end = s.active ? Date.now() : new Date(s.lastSeen).getTime()
-      total += end - new Date(s.firstSeen).getTime()
-    }
-    return total
-  }
 
   const formatDuration = (ms: number) => {
     const h = Math.floor(ms / 3600000)
@@ -89,6 +126,11 @@ export default function InstancesPage() {
     if (h > 0) return `${h}时${m}分`
     if (m > 0) return `${m}分`
     return '刚刚'
+  }
+
+  const getPlayerDisplayDuration = (player: PlayerTrackingData['players'][number]) => {
+    if (!player.active || !player.currentSessionStartedAt) return player.totalDurationMs
+    return player.totalDurationMs + Math.max(0, Date.now() - new Date(player.currentSessionStartedAt).getTime())
   }
 
   const openCreate = () => { setShowCreate(true); setTimeout(() => setCreateAnimating(true), 10) }
@@ -183,6 +225,8 @@ export default function InstancesPage() {
         <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
           {instances.map(inst => {
             const data = chartData[inst.id]
+            const playerData = trackingData[inst.id]
+            const hasReliablePlayerList = playerData?.listStatus === 'available'
             return (
               <motion.div key={inst.id} layout initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
                 className="bg-white rounded-xl border border-surface-200">
@@ -193,10 +237,10 @@ export default function InstancesPage() {
                     <h3 className="font-medium text-gray-800">{inst.name}</h3>
                     <p className="text-xs text-gray-400 mt-0.5 truncate">{inst.workingDirectory || inst.description || '未设置目录'}</p>
                     <span className="inline-block text-xs text-gray-400 mt-1 capitalize">{inst.status}</span>
-                    {inst.status === 'running' && playerSessions[inst.id]?.some(s => s.active) && (
+                    {inst.status === 'running' && hasReliablePlayerList && playerData.players.some(player => player.active) && (
                       <span className="inline-flex items-center gap-1 text-xs text-green-600 bg-green-50 px-1.5 py-0.5 rounded-full mt-1 ml-2">
                         <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
-                        {playerSessions[inst.id].filter(s => s.active).length} 在线
+                        {playerData.players.filter(player => player.active).length} 在线
                       </span>
                     )}
                   </div>
@@ -214,55 +258,60 @@ export default function InstancesPage() {
                 </div>
                 {/* 折线图区域（左侧图表 + 右侧在线玩家） */}
                 <div className="border-t border-surface-100">
-                  <div className="px-5 pb-4 pt-3 flex gap-4">
+                  <div className="px-5 pb-4 pt-3 flex flex-col sm:flex-row gap-4">
                     {/* 左侧：历史在线人数图表 */}
                     <div className="flex-1 min-w-0">
                       <h4 className="text-xs font-medium text-gray-500 mb-2">历史在线人数</h4>
-                      {data ? (
-                        <PlayerChart data={data} width={400} height={140} playerSessions={playerSessions[inst.id]} />
-                      ) : (
-                        <div className="text-xs text-gray-400 py-6 text-center">加载中...</div>
-                      )}
+                      <PlayerChart
+                        data={data || []}
+                        height={140}
+                        loading={chartLoadStatus[inst.id] === 'loading'}
+                        error={chartLoadStatus[inst.id] === 'error'}
+                        playerSessions={playerData?.sessions}
+                      />
                     </div>
                     {/* 右侧：所有玩家及游玩时长 */}
-                    <div className="w-44 shrink-0 border-l border-surface-100 pl-4">
+                    <div className="w-full sm:w-44 shrink-0 border-t sm:border-t-0 sm:border-l border-surface-100 pt-3 sm:pt-0 sm:pl-4">
                       <h4 className="text-xs font-medium text-gray-500 mb-2 flex items-center gap-1">
                         <Users className="w-3 h-3" />玩家
                       </h4>
-                      {playerSessions[inst.id] && playerSessions[inst.id].length > 0 ? (
+                      {inst.status === 'running' && playerData?.listStatus === 'unsupported' && (
+                        <p className="text-[11px] leading-4 text-amber-600 mb-2">服务器未提供完整玩家名单，以下仅显示历史记录</p>
+                      )}
+                      {inst.status === 'running' && playerData?.listStatus === 'unavailable' && trackingLoadStatus[inst.id] === 'ready' && (
+                        <p className="text-[11px] leading-4 text-gray-400 mb-2">玩家查询暂不可用，以下仅显示历史记录</p>
+                      )}
+                      {playerData?.players.length > 0 ? (
                         <div className="space-y-2 max-h-60 overflow-y-auto">
-                          {(() => {
-                            // 按 playerId 聚合所有会话，计算累计总时长
-                            const grouped: Record<string, PlayerSession[]> = {}
-                            for (const s of playerSessions[inst.id]) {
-                              if (!grouped[s.playerId]) grouped[s.playerId] = []
-                              grouped[s.playerId].push(s)
-                            }
-                            // 按总在线时长从高到低排序
-                            const sorted = Object.entries(grouped).sort(([, aSessions], [, bSessions]) => {
-                              const aMs = getPlayerTotalDuration(aSessions)
-                              const bMs = getPlayerTotalDuration(bSessions)
-                              return bMs - aMs
-                            })
-                            return sorted.map(([playerId, sessions]) => {
-                              const isOnline = sessions.some(s => s.active)
-                              const totalMs = getPlayerTotalDuration(sessions)
-                              const playerName = sessions[0].playerName
+                          {playerData.players
+                            .slice()
+                            .sort((a, b) => getPlayerDisplayDuration(b) - getPlayerDisplayDuration(a))
+                            .map(player => {
+                              const playerIsActive = hasReliablePlayerList && player.active
                               return (
-                                <div key={playerId} className="flex items-center justify-between text-xs">
-                                  <span className={`flex items-center gap-1.5 truncate ${isOnline ? 'text-gray-700' : 'text-gray-400'}`}>
-                                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isOnline ? 'bg-green-500' : 'bg-gray-300'}`} />
-                                    <span className={`truncate ${isOnline ? 'text-green-700' : 'text-gray-400'}`}>{playerName}</span>
+                                <div key={player.playerId} className="flex items-center justify-between text-xs">
+                                  <span className={`flex items-center gap-1.5 truncate ${playerIsActive ? 'text-gray-700' : 'text-gray-400'}`}>
+                                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${playerIsActive ? 'bg-green-500' : 'bg-gray-300'}`} />
+                                    <span className={`truncate ${playerIsActive ? 'text-green-700' : 'text-gray-400'}`}>{player.playerName}</span>
                                   </span>
-                                  <span className="text-gray-400 shrink-0 ml-2">{formatDuration(totalMs)}</span>
+                                  <span className="text-gray-400 shrink-0 ml-2">{formatDuration(playerIsActive ? getPlayerDisplayDuration(player) : player.totalDurationMs)}</span>
                                 </div>
                               )
-                            })
-                          })()}
+                            })}
                         </div>
                       ) : (
-                        <div className="flex items-center justify-center py-8 text-gray-300">
-                          <Users className="w-5 h-5" />
+                        <div className="flex items-center justify-center py-8 text-center text-xs text-gray-400">
+                          {trackingLoadStatus[inst.id] === 'loading'
+                            ? '正在加载玩家数据...'
+                            : trackingLoadStatus[inst.id] === 'error'
+                              ? '玩家数据加载失败，正在重试'
+                              : inst.status !== 'running'
+                                ? '实例未运行'
+                                : playerData?.listStatus === 'unsupported'
+                                  ? '服务器未提供完整玩家名单'
+                                  : playerData?.listStatus === 'unavailable'
+                                    ? '玩家查询暂不可用'
+                                    : '暂无玩家记录'}
                         </div>
                       )}
                     </div>

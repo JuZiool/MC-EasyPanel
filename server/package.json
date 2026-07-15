@@ -33,6 +33,7 @@
     "@types/node": "^20.19.37",
     "@types/tar": "^6.1.13",
     "@types/uuid": "^10.0.0",
+    "esbuild": "^0.28.1",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3"
   },

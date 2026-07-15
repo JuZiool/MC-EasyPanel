@@ -1,16 +1,22 @@
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
-import { useEffect } from 'react'
+import { lazy, Suspense, useEffect } from 'react'
 import { useAuthStore } from './stores/authStore'
 import socketClient from './utils/socket'
-import LoginPage from './pages/LoginPage'
 import Layout from './components/Layout'
 import PageTransition from './components/PageTransition'
 import NotificationContainer from './components/NotificationContainer'
-import DashboardPage from './pages/DashboardPage'
-import InstancesPage from './pages/InstancesPage'
-import FileManagerPage from './pages/FileManagerPage'
-import TerminalPage from './pages/TerminalPage'
-import SettingsPage from './pages/SettingsPage'
+import LoadingSpinner from './components/LoadingSpinner'
+
+const LoginPage = lazy(() => import('./pages/LoginPage'))
+const DashboardPage = lazy(() => import('./pages/DashboardPage'))
+const InstancesPage = lazy(() => import('./pages/InstancesPage'))
+const FileManagerPage = lazy(() => import('./pages/FileManagerPage'))
+const TerminalPage = lazy(() => import('./pages/TerminalPage'))
+const SettingsPage = lazy(() => import('./pages/SettingsPage'))
+
+function RouteFallback() {
+  return <div className="flex min-h-48 items-center justify-center"><LoadingSpinner /></div>
+}
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuthStore()
@@ -40,22 +46,24 @@ export default function App() {
   }, [isAuthenticated, token])
 
   return (
-    <Routes>
-      <Route path="/login" element={<PublicRoute><LoginPage /></PublicRoute>} />
-      <Route path="/*" element={
-        <ProtectedRoute>
-          <Layout>
-            <NotificationContainer />
-            <Routes>
-              <Route path="/" element={<PageTransition><DashboardPage /></PageTransition>} />
-              <Route path="/instances" element={<PageTransition><InstancesPage /></PageTransition>} />
-              <Route path="/files" element={<PageTransition><FileManagerPage /></PageTransition>} />
-              <Route path="/terminal" element={<PageTransition><TerminalPage /></PageTransition>} />
-              <Route path="/settings" element={<PageTransition><SettingsPage /></PageTransition>} />
-            </Routes>
-          </Layout>
-        </ProtectedRoute>
-      } />
-    </Routes>
+    <Suspense fallback={<RouteFallback />}>
+      <Routes>
+        <Route path="/login" element={<PublicRoute><LoginPage /></PublicRoute>} />
+        <Route path="/*" element={
+          <ProtectedRoute>
+            <Layout>
+              <NotificationContainer />
+              <Routes>
+                <Route path="/" element={<PageTransition><DashboardPage /></PageTransition>} />
+                <Route path="/instances" element={<PageTransition><InstancesPage /></PageTransition>} />
+                <Route path="/files" element={<PageTransition><FileManagerPage /></PageTransition>} />
+                <Route path="/terminal" element={<PageTransition><TerminalPage /></PageTransition>} />
+                <Route path="/settings" element={<PageTransition><SettingsPage /></PageTransition>} />
+              </Routes>
+            </Layout>
+          </ProtectedRoute>
+        } />
+      </Routes>
+    </Suspense>
   )
 }

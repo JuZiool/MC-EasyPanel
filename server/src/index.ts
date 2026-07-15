@@ -104,8 +104,8 @@ const playerSessionTracker = new PlayerSessionTracker({
       instances.map(i => ({ id: i.id, name: i.name, workingDirectory: i.workingDirectory }))
     )
   },
-  onUpdate: (sessionsByInstance) => {
-    io.emit('player-sessions-update', sessionsByInstance)
+  onUpdate: (dataByInstance) => {
+    io.emit('player-sessions-update', dataByInstance)
   }
 })
 playerSessionTracker.start()
@@ -336,12 +336,12 @@ httpServer.listen(PORT, '0.0.0.0', () => {
 })
 
 // 优雅关闭
-function gracefulShutdown(signal: string) {
+async function gracefulShutdown(signal: string) {
   logger.info(`收到 ${signal} 信号，开始优雅关闭...`)
 
   // 停止定时器
-  playerStatsRecorder.stop()
-  playerSessionTracker.stop()
+  await playerStatsRecorder.stop()
+  await playerSessionTracker.stop()
   clearInterval(instanceMemoryTimer)
 
   // 停止日志缓冲区自动清理

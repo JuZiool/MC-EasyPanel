@@ -25,6 +25,10 @@ export class PlayerStatsRecorder {
   private timer: NodeJS.Timeout | null = null
   private baseDir: string
   private options: PlayerStatsRecorderOptions
+  private historyByInstance = new Map<string, PlayerSnapshot[]>()
+  private writeQueues = new Map<string, Promise<void>>()
+  private activeRecord: Promise<void> | null = null
+  private running = false
 
   constructor(options: PlayerStatsRecorderOptions) {
     this.options = options
@@ -36,26 +40,44 @@ export class PlayerStatsRecorder {
     // 使用第一个可用的路径，或默认第一个
     this.baseDir = possiblePaths[0]
     fs.mkdirSync(this.baseDir, { recursive: true })
+    this.loadHistoryCache()
   }
 
   start(): void {
-    this.record()
-    this.scheduleNext()
+    if (this.running) return
+    this.running = true
+    void this.recordAndSchedule()
     logger.info(`玩家数据记录器已启动，间隔 ${RECORD_INTERVAL / 1000}s`)
   }
 
-  stop(): void {
+  async stop(): Promise<void> {
+    this.running = false
     if (this.timer) {
       clearTimeout(this.timer)
       this.timer = null
     }
+    if (this.activeRecord) await this.activeRecord
+    await Promise.all(this.writeQueues.values())
     logger.info('玩家数据记录器已停止')
   }
 
-  private scheduleNext(): void {
-    this.timer = setTimeout(() => {
-      this.record().finally(() => this.scheduleNext())
-    }, RECORD_INTERVAL)
+  private loadHistoryCache(): void {
+    for (const fileName of fs.readdirSync(this.baseDir)) {
+      if (!fileName.endsWith('.json') || fileName === 'player-sessions.json' || fileName === 'player-totals.json') continue
+      try {
+        const records = JSON.parse(fs.readFileSync(path.join(this.baseDir, fileName), 'utf-8'))
+        if (Array.isArray(records)) this.historyByInstance.set(fileName.slice(0, -5), records)
+      } catch {}
+    }
+  }
+
+  private async recordAndSchedule(): Promise<void> {
+    const activeRecord = this.record()
+    this.activeRecord = activeRecord
+    await activeRecord
+    if (this.activeRecord === activeRecord) this.activeRecord = null
+    if (!this.running) return
+    this.timer = setTimeout(() => void this.recordAndSchedule(), RECORD_INTERVAL)
   }
 
   private async record(): Promise<void> {
@@ -69,7 +91,7 @@ export class PlayerStatsRecorder {
         try {
           const result = await this.options.queryPlayerCount(inst.workingDirectory)
           if (result) {
-            this.appendSnapshot(inst.id, result.online, result.max)
+            await this.appendSnapshot(inst.id, result.online, result.max)
           }
         } catch (e: any) {
           logger.debug(`记录实例 ${inst.name} 玩家数据失败: ${e.message}`)
@@ -82,45 +104,43 @@ export class PlayerStatsRecorder {
     }
   }
 
-  private appendSnapshot(instanceId: string, online: number, max: number): void {
-    const filePath = path.join(this.baseDir, `${instanceId}.json`)
-    let records: PlayerSnapshot[] = []
-
-    try {
-      if (fs.existsSync(filePath)) {
-        const content = fs.readFileSync(filePath, 'utf-8')
-        records = JSON.parse(content)
-      }
-    } catch { records = [] }
-
-    records.push({
+  private async appendSnapshot(instanceId: string, online: number, max: number): Promise<void> {
+    const records = [...(this.historyByInstance.get(instanceId) || []), {
       time: new Date().toISOString(),
       online,
       max
+    }]
+
+    const limitedRecords = records.length > MAX_RECORDS ? records.slice(records.length - MAX_RECORDS) : records
+    this.historyByInstance.set(instanceId, limitedRecords)
+    await this.queueWrite(instanceId, limitedRecords)
+  }
+
+  private queueWrite(instanceId: string, records: PlayerSnapshot[]): Promise<void> {
+    const filePath = path.join(this.baseDir, `${instanceId}.json`)
+    const tempPath = `${filePath}.tmp`
+    const payload = JSON.stringify(records, null, 2)
+    const previous = this.writeQueues.get(instanceId) || Promise.resolve()
+    const next = previous
+      .catch(() => undefined)
+      .then(async () => {
+        await fs.promises.writeFile(tempPath, payload)
+        await fs.promises.rename(tempPath, filePath)
+      })
+      .catch((error: any) => {
+        logger.error(`保存玩家统计数据失败: ${error.message}`)
+      })
+    this.writeQueues.set(instanceId, next)
+    void next.finally(() => {
+      if (this.writeQueues.get(instanceId) === next) this.writeQueues.delete(instanceId)
     })
-
-    // 限制数量，删除最旧的数据
-    if (records.length > MAX_RECORDS) {
-      records = records.slice(records.length - MAX_RECORDS)
-    }
-
-    try {
-      fs.writeFileSync(filePath, JSON.stringify(records, null, 2))
-    } catch (e: any) {
-      logger.error(`保存玩家统计数据失败: ${e.message}`)
-    }
+    return next
   }
 
   /**
    * 获取指定实例的历史在线人数数据
    */
   getHistory(instanceId: string): PlayerSnapshot[] {
-    const filePath = path.join(this.baseDir, `${instanceId}.json`)
-    try {
-      if (fs.existsSync(filePath)) {
-        return JSON.parse(fs.readFileSync(filePath, 'utf-8'))
-      }
-    } catch {}
-    return []
+    return [...(this.historyByInstance.get(instanceId) || [])]
   }
 }
