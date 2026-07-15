@@ -272,12 +272,11 @@ export default function InstancesPage() {
                     <button onClick={() => setDeleteTarget(inst.id)} className="p-2 rounded-lg text-red-400 hover:bg-red-50 transition-colors" title="删除"><Trash2 className="w-4 h-4" /></button>
                   </div>
                 </div>
-                {/* 折线图区域（左侧图表 + 右侧在线玩家） */}
+                {/* 在线人数图表区域（左侧图表 + 右侧在线玩家） */}
                 <div className="border-t border-surface-100">
                   <div className="px-5 pb-4 pt-3 flex flex-col sm:flex-row gap-4">
                     {/* 左侧：历史在线人数图表 */}
                     <div className="flex-1 min-w-0">
-                      <h4 className="text-xs font-medium text-gray-500 mb-2">历史在线人数</h4>
                       <PlayerChart
                         data={data || []}
                         height={140}
