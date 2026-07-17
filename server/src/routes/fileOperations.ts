@@ -3,6 +3,7 @@ import fs from 'fs'
 import path from 'path'
 import { authenticateToken, AuthenticatedRequest } from '../middleware/auth.js'
 import { isValidPath, upload } from './fileUtils.js'
+import { normalizeFileSortBy, sortFileItems } from '../utils/fileSorting.js'
 
 const router = Router()
 
@@ -13,21 +14,20 @@ router.get('/list', (req: AuthenticatedRequest, res) => {
     if (!fs.existsSync(dirPath)) return res.status(404).json({ success: false, message: '路径不存在' })
     const page = parseInt(req.query.page as string) || 1
     const pageSize = parseInt(req.query.pageSize as string) || 50
+    const sortBy = normalizeFileSortBy(req.query.sortBy)
     const entries = fs.readdirSync(dirPath, { withFileTypes: true })
     const files = entries.map(e => {
       try {
         const fullPath = path.join(dirPath, e.name)
         const stat = fs.statSync(fullPath)
         const perm = (stat.mode & 0o777).toString(8).padStart(3, '0')
-        return { name: e.name, path: fullPath, type: e.isDirectory() ? 'directory' : 'file', size: stat.size, modified: stat.mtime.toISOString(), permissions: perm }
+        return { name: e.name, path: fullPath, type: e.isDirectory() ? ('directory' as const) : ('file' as const), size: stat.size, modified: stat.mtime.toISOString(), permissions: perm }
       } catch { return null }
-    }).filter(Boolean).sort((a: any, b: any) => {
-      if (a.type !== b.type) return a.type === 'directory' ? -1 : 1
-      return a.name.localeCompare(b.name, 'zh-CN')
-    })
-    const total = files.length
+    }).filter((file): file is NonNullable<typeof file> => file !== null)
+    const sortedFiles = sortFileItems(files, sortBy)
+    const total = sortedFiles.length
     const totalPages = Math.ceil(total / pageSize)
-    const paginated = files.slice((page - 1) * pageSize, page * pageSize)
+    const paginated = sortedFiles.slice((page - 1) * pageSize, page * pageSize)
     res.json({ success: true, data: { files: paginated, pagination: { page, pageSize, total, totalPages, hasMore: page < totalPages } } })
   } catch (e: any) { res.status(500).json({ success: false, message: e.message }) }
 })
@@ -63,11 +63,8 @@ router.get('/search', (req: AuthenticatedRequest, res) => {
     }
 
     walk(rootPath, 0)
-    results.sort((a, b) => {
-      if (a.type !== b.type) return a.type === 'directory' ? -1 : 1
-      return a.name.localeCompare(b.name, 'zh-CN')
-    })
-    res.json({ success: true, data: results.slice(0, 200) })
+    const sortBy = normalizeFileSortBy(req.query.sortBy)
+    res.json({ success: true, data: sortFileItems(results, sortBy).slice(0, 200) })
   } catch (e: any) { res.status(500).json({ success: false, message: e.message }) }
 })
 

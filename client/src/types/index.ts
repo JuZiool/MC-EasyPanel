@@ -46,6 +46,8 @@ export interface FileItem {
   permissions?: string
 }
 
+export type FileSortBy = 'name' | 'size' | 'modified'
+
 export interface FilePagination {
   page: number
   pageSize: number

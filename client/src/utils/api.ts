@@ -1,5 +1,5 @@
 import axios, { AxiosInstance, AxiosRequestConfig } from 'axios'
-import type { Instance, FileListResponse, SystemStats } from '../types'
+import type { Instance, FileListResponse, FileSortBy, SystemStats } from '../types'
 
 class ApiClient {
   private client: AxiosInstance
@@ -83,8 +83,8 @@ class ApiClient {
   async getInstancePlayerSessions(instanceId: string) { return this.get<import('../types').PlayerTrackingData>(`/instances/${instanceId}/player-sessions`) }
 
   // Files
-  async listFiles(path: string, page = 1, pageSize = 50) { return this.get<FileListResponse>('/files/list', { params: { path, page, pageSize } }) }
-  async searchFiles(path: string, query: string) { return this.get<{ name: string; path: string; type: 'file' | 'directory'; size: number; modified: string }[]>('/files/search', { params: { path, query } }) }
+  async listFiles(path: string, page = 1, pageSize = 50, sortBy: FileSortBy = 'name') { return this.get<FileListResponse>('/files/list', { params: { path, page, pageSize, sortBy } }) }
+  async searchFiles(path: string, query: string, sortBy: FileSortBy = 'name') { return this.get<{ name: string; path: string; type: 'file' | 'directory'; size: number; modified: string }[]>('/files/search', { params: { path, query, sortBy } }) }
   async readFile(path: string) { return this.get<{ content: string; encoding?: string }>('/files/read', { params: { path } }) }
   async saveFile(path: string, content: string, encoding?: string) { return this.post('/files/save', { path, content, encoding }) }
   async deleteFile(path: string, operationId?: string, socketId?: string) {

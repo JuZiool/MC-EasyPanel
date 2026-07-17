@@ -11,7 +11,9 @@ import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
 import ProgressPanel from '../components/ProgressPanel'
 import UploadModal from '../components/UploadModal'
 import { isArchiveFile } from '../../../shared/archiveFormats.js'
-import { ArrowLeft, Upload, FilePlus, FolderPlus, RefreshCw, Download, Edit3, Trash2, FileText, Folder, Copy, Scissors, Edit, FileArchive, CheckSquare, Square, Link, Search, X, Shield } from 'lucide-react'
+import { createLatestRequestGuard } from '../utils/latestRequestGuard'
+import type { FileSortBy } from '../types'
+import { ArrowLeft, Upload, FilePlus, FolderPlus, RefreshCw, Download, Edit3, Trash2, FileText, Folder, Copy, Scissors, Edit, FileArchive, CheckSquare, Square, Link, Search, X, Shield, ArrowDownUp } from 'lucide-react'
 
 interface ContextMenu {
   x: number; y: number; file: { path: string; name: string; type: 'file' | 'directory' }
@@ -22,7 +24,7 @@ function genOpId() { return `op_${Date.now()}_${++opCounter}` }
 
 export default function FileManagerPage() {
   const [searchParams] = useSearchParams()
-  const { currentPath, files, pagination, loading, fetchFiles } = useFileStore()
+  const { currentPath, files, pagination, loading, sortBy, setSortBy, fetchFiles } = useFileStore()
   const { addNotification } = useNotificationStore()
   const { addItem, updateItem, removeItem } = useProgressStore()
   const [editFile, setEditFile] = useState<{ path: string; content: string; name: string } | null>(null)
@@ -50,6 +52,7 @@ export default function FileManagerPage() {
   const [permSaving, setPermSaving] = useState(false)
   const [editingPath, setEditingPath] = useState(false)
   const [editPathValue, setEditPathValue] = useState('')
+  const searchRequestGuard = useRef(createLatestRequestGuard())
 
   useEffect(() => {
     const pathParam = searchParams.get('path') || localStorage.getItem('filemanager_lastPath') || '/app/servers'
@@ -280,15 +283,18 @@ export default function FileManagerPage() {
   const doSearch = useCallback(async (query: string) => {
     if (!query.trim()) { setSearchResults(null); return }
     if (!currentPath) return
+    const requestId = searchRequestGuard.current.start()
     setSearching(true)
-    const res = await apiClient.searchFiles(currentPath, query.trim())
+    const res = await apiClient.searchFiles(currentPath, query.trim(), sortBy)
+    if (!searchRequestGuard.current.isCurrent(requestId)) return
     if (res.success && res.data) setSearchResults(res.data)
     else setSearchResults([])
     setSearching(false)
-  }, [currentPath])
+  }, [currentPath, sortBy])
 
   useEffect(() => {
-    if (!searchQuery.trim()) { setSearchResults(null); return }
+    searchRequestGuard.current.invalidate()
+    if (!searchQuery.trim()) { setSearchResults(null); setSearching(false); return }
     const timer = setTimeout(() => doSearch(searchQuery), 300)
     return () => clearTimeout(timer)
   }, [searchQuery, doSearch])
@@ -296,6 +302,12 @@ export default function FileManagerPage() {
   const clearSearch = () => {
     setSearchQuery('')
     setSearchResults(null)
+  }
+
+  const handleSortChange = (nextSortBy: FileSortBy) => {
+    setSortBy(nextSortBy)
+    setSelectedPaths(new Set())
+    if (!searchQuery.trim()) fetchFiles(currentPath, 1, nextSortBy)
   }
 
   const handleUploadFiles = async (files: File[]) => {
@@ -506,6 +518,16 @@ export default function FileManagerPage() {
               <span className="w-32 text-right">修改时间</span>
               </>
             )}
+            <label className="flex items-center gap-1.5 shrink-0 text-xs text-gray-500">
+              <ArrowDownUp className="w-3.5 h-3.5 text-gray-400" />
+              <span className="hidden sm:inline">排序</span>
+              <select value={sortBy} onChange={e => handleSortChange(e.target.value as FileSortBy)}
+                className="bg-white border border-surface-200 rounded-md px-1.5 py-1 text-xs text-gray-600 outline-none focus:border-primary-400">
+                <option value="name">名称</option>
+                <option value="size">大小</option>
+                <option value="modified">修改时间</option>
+              </select>
+            </label>
           </div>
           {displayFiles.map((file, i) => (
             <motion.div key={file.path} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.02 }}
