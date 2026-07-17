@@ -47,6 +47,7 @@ export interface FileItem {
 }
 
 export type FileSortBy = 'name' | 'size' | 'modified'
+export type FileSortOrder = 'asc' | 'desc'
 
 export interface FilePagination {
   page: number

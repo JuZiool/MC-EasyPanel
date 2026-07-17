@@ -12,8 +12,8 @@ import ProgressPanel from '../components/ProgressPanel'
 import UploadModal from '../components/UploadModal'
 import { isArchiveFile } from '../../../shared/archiveFormats.js'
 import { createLatestRequestGuard } from '../utils/latestRequestGuard'
-import type { FileSortBy } from '../types'
-import { ArrowLeft, Upload, FilePlus, FolderPlus, RefreshCw, Download, Edit3, Trash2, FileText, Folder, Copy, Scissors, Edit, FileArchive, CheckSquare, Square, Link, Search, X, Shield, ArrowDownAZ, ArrowDownWideNarrow } from 'lucide-react'
+import type { FileSortBy, FileSortOrder } from '../types'
+import { ArrowLeft, Upload, FilePlus, FolderPlus, RefreshCw, Download, Edit3, Trash2, FileText, Folder, Copy, Scissors, Edit, FileArchive, CheckSquare, Square, Link, Search, X, Shield, ArrowDownAZ, ArrowDownZA, ArrowDownNarrowWide, ArrowDownWideNarrow } from 'lucide-react'
 
 interface ContextMenu {
   x: number; y: number; file: { path: string; name: string; type: 'file' | 'directory' }
@@ -24,7 +24,7 @@ function genOpId() { return `op_${Date.now()}_${++opCounter}` }
 
 export default function FileManagerPage() {
   const [searchParams] = useSearchParams()
-  const { currentPath, files, pagination, loading, sortBy, setSortBy, fetchFiles } = useFileStore()
+  const { currentPath, files, pagination, loading, sortBy, sortOrder, setSort, fetchFiles } = useFileStore()
   const { addNotification } = useNotificationStore()
   const { addItem, updateItem, removeItem } = useProgressStore()
   const [editFile, setEditFile] = useState<{ path: string; content: string; name: string } | null>(null)
@@ -285,12 +285,12 @@ export default function FileManagerPage() {
     if (!currentPath) return
     const requestId = searchRequestGuard.current.start()
     setSearching(true)
-    const res = await apiClient.searchFiles(currentPath, query.trim(), sortBy)
+    const res = await apiClient.searchFiles(currentPath, query.trim(), sortBy, sortOrder)
     if (!searchRequestGuard.current.isCurrent(requestId)) return
     if (res.success && res.data) setSearchResults(res.data)
     else setSearchResults([])
     setSearching(false)
-  }, [currentPath, sortBy])
+  }, [currentPath, sortBy, sortOrder])
 
   useEffect(() => {
     searchRequestGuard.current.invalidate()
@@ -305,13 +305,18 @@ export default function FileManagerPage() {
   }
 
   const handleSortChange = (nextSortBy: FileSortBy) => {
-    setSortBy(nextSortBy)
+    const nextSortOrder: FileSortOrder = nextSortBy === sortBy
+      ? (sortOrder === 'asc' ? 'desc' : 'asc')
+      : (nextSortBy === 'name' ? 'asc' : 'desc')
+    setSort(nextSortBy, nextSortOrder)
     setSelectedPaths(new Set())
-    if (!searchQuery.trim()) fetchFiles(currentPath, 1, nextSortBy)
+    if (!searchQuery.trim()) fetchFiles(currentPath, 1, nextSortBy, nextSortOrder)
   }
 
   const renderSortHeader = (field: FileSortBy, label: string, className: string) => {
-    const SortIcon = field === 'name' ? ArrowDownAZ : ArrowDownWideNarrow
+    const SortIcon = field === 'name'
+      ? (sortOrder === 'asc' ? ArrowDownAZ : ArrowDownZA)
+      : (sortOrder === 'asc' ? ArrowDownNarrowWide : ArrowDownWideNarrow)
     return (
       <button type="button" onClick={() => handleSortChange(field)}
         className={`${className} inline-flex items-center gap-1 hover:text-primary-600 transition-colors ${sortBy === field ? 'text-primary-600' : ''}`}
