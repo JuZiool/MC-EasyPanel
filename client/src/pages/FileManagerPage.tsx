@@ -13,7 +13,7 @@ import UploadModal from '../components/UploadModal'
 import { isArchiveFile } from '../../../shared/archiveFormats.js'
 import { createLatestRequestGuard } from '../utils/latestRequestGuard'
 import type { FileSortBy } from '../types'
-import { ArrowLeft, Upload, FilePlus, FolderPlus, RefreshCw, Download, Edit3, Trash2, FileText, Folder, Copy, Scissors, Edit, FileArchive, CheckSquare, Square, Link, Search, X, Shield, ArrowDownUp } from 'lucide-react'
+import { ArrowLeft, Upload, FilePlus, FolderPlus, RefreshCw, Download, Edit3, Trash2, FileText, Folder, Copy, Scissors, Edit, FileArchive, CheckSquare, Square, Link, Search, X, Shield, ArrowDownAZ, ArrowDownWideNarrow } from 'lucide-react'
 
 interface ContextMenu {
   x: number; y: number; file: { path: string; name: string; type: 'file' | 'directory' }
@@ -310,6 +310,18 @@ export default function FileManagerPage() {
     if (!searchQuery.trim()) fetchFiles(currentPath, 1, nextSortBy)
   }
 
+  const renderSortHeader = (field: FileSortBy, label: string, className: string) => {
+    const SortIcon = field === 'name' ? ArrowDownAZ : ArrowDownWideNarrow
+    return (
+      <button type="button" onClick={() => handleSortChange(field)}
+        className={`${className} inline-flex items-center gap-1 hover:text-primary-600 transition-colors ${sortBy === field ? 'text-primary-600' : ''}`}
+        title={`按${label}排序`}>
+        <span>{label}</span>
+        {sortBy === field && <SortIcon className="w-3.5 h-3.5" />}
+      </button>
+    )
+  }
+
   const handleUploadFiles = async (files: File[]) => {
     if (files.length === 0) return
 
@@ -512,22 +524,12 @@ export default function FileManagerPage() {
                 {selectedPaths.size === files.length && files.length > 0 ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4" />}
               </button>
               <span className="w-4 shrink-0" />
-              <span className="flex-1">名称</span>
+              {renderSortHeader('name', '名称', 'flex-1 text-left')}
               <span className="w-16 text-right">权限</span>
-              <span className="w-20 text-right">大小</span>
-              <span className="w-32 text-right">修改时间</span>
+              {renderSortHeader('size', '大小', 'w-20 justify-end text-right')}
+              {renderSortHeader('modified', '修改时间', 'w-32 justify-end text-right')}
               </>
             )}
-            <label className="flex items-center gap-1.5 shrink-0 text-xs text-gray-500">
-              <ArrowDownUp className="w-3.5 h-3.5 text-gray-400" />
-              <span className="hidden sm:inline">排序</span>
-              <select value={sortBy} onChange={e => handleSortChange(e.target.value as FileSortBy)}
-                className="bg-white border border-surface-200 rounded-md px-1.5 py-1 text-xs text-gray-600 outline-none focus:border-primary-400">
-                <option value="name">名称</option>
-                <option value="size">大小</option>
-                <option value="modified">修改时间</option>
-              </select>
-            </label>
           </div>
           {displayFiles.map((file, i) => (
             <motion.div key={file.path} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.02 }}
