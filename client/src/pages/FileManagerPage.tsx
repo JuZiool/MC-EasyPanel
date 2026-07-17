@@ -13,7 +13,7 @@ import UploadModal from '../components/UploadModal'
 import { isArchiveFile } from '../../../shared/archiveFormats.js'
 import { createLatestRequestGuard } from '../utils/latestRequestGuard'
 import type { FileSortBy, FileSortOrder } from '../types'
-import { ArrowLeft, Upload, FilePlus, FolderPlus, RefreshCw, Download, Edit3, Trash2, FileText, Folder, Copy, Scissors, Edit, FileArchive, CheckSquare, Square, Link, Search, X, Shield, ArrowDownAZ, ArrowDownZA, ArrowDownNarrowWide, ArrowDownWideNarrow } from 'lucide-react'
+import { ArrowLeft, Upload, FilePlus, FolderPlus, RefreshCw, Download, Edit3, Trash2, FileText, Folder, Copy, Scissors, Edit, FileArchive, CheckSquare, Square, Link, Search, X, Shield, ArrowUp, ArrowDown } from 'lucide-react'
 
 interface ContextMenu {
   x: number; y: number; file: { path: string; name: string; type: 'file' | 'directory' }
@@ -314,9 +314,7 @@ export default function FileManagerPage() {
   }
 
   const renderSortHeader = (field: FileSortBy, label: string, className: string) => {
-    const SortIcon = field === 'name'
-      ? (sortOrder === 'asc' ? ArrowDownAZ : ArrowDownZA)
-      : (sortOrder === 'asc' ? ArrowDownNarrowWide : ArrowDownWideNarrow)
+    const SortIcon = sortOrder === 'asc' ? ArrowUp : ArrowDown
     return (
       <button type="button" onClick={() => handleSortChange(field)}
         className={`${className} inline-flex items-center gap-1 hover:text-primary-600 transition-colors ${sortBy === field ? 'text-primary-600' : ''}`}
